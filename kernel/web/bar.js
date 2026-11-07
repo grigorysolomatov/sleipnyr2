@@ -277,12 +277,18 @@ export function createBar(ctx, app) {
     const file = keep ? await rec.stop() : await rec.cancel();
     if (!file) return keep && say("Nothing was recorded.", true);
     sentFx(); form.classList.add("sending");
+    const files = b.pending; // attachments waiting in the tray go with the voice message
     try {
       const voice = await ctx.upload(file);
+      await Promise.all(files.map(p => p.upload));
+      const failed = files.find(p => p.error);
+      if (failed) throw new Error(`upload of ${failed.file.name || "a file"} failed: ${failed.error}`);
       const mode = await whenMode();
-      await deliver({ text: ta.value.trim(), voice: voice.id, files: [], ...(mode ? { mode } : {}) });
+      await deliver({ text: ta.value.trim(), voice: voice.id, files: files.map(p => p.id), ...(mode ? { mode } : {}) });
       form.classList.remove("sending");
       ta.value = ""; grow();
+      files.forEach(p => p.url && URL.revokeObjectURL(p.url));
+      b.pending = b.pending.filter(p => !files.includes(p)); drawTray();
     } catch (e) {
       form.classList.remove("sending");
       say(`Voice message not sent: ${e.message}`, true);
