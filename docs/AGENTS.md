@@ -12,6 +12,8 @@ explains the architecture and `docs/INSTALL.md` the install steps.
   before risky changes. Archive with `hidden: true`, do not delete items.
 - Keep it on 127.0.0.1 plus `tailscale serve` (tailnet only). There is no
   login yet: never expose it with `tailscale funnel` or a public proxy.
+  The one exception is the `people` inbox port (a separate listener that
+  only takes signed messages from configured peers; `docs/PEERS.md`).
 - Test with throwaway threads named "(agent testing, ignore)" and tell your
   user afterwards so they can hide them.
 
@@ -45,6 +47,11 @@ Plugins and their settings (all optional unless marked):
 - `talk`: `hearUrl`, `speakUrl`, `maxSeconds` (hands-free voice).
 - `blackboards`, `columns`: none.
 - `projects`: `list` = [{id, title, doc}] (id lowercase, a-z0-9_-).
+- `people` (person-to-person chat, no agent; `docs/PEERS.md`): `name`
+  (default `user.name`), `keyEnv` (PEOPLE_KEY; the private key, made by
+  `bun plugins/people/keygen.ts`), `inbox` {host, port} (127.0.0.1:8183),
+  `peers` [{id, name, url, key}]. Without a key and a peer the plugin only
+  shows its empty view; nothing listens.
 - `tinder` (Task Tinder; creates Kanban cards on swipe right):
   - `kanbanUrl` (http://127.0.0.1:9120) + `keyEnv` (KANBAN_PROXY_KEY): an
     HTTP endpoint accepting `POST /api/plugins/kanban/tasks?board=<slug>`

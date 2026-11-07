@@ -1,0 +1,42 @@
+/* People (trial): theme tokens only; white separator lines, pink = where you are.
+   Messages reuse the chat's look (.c-msg, .c-who, .c-text from chat.css).
+   Each selector once (tests/css.test.ts). */
+
+.pp-bar {
+  display: flex; align-items: center; gap: .5rem; min-height: 3rem; flex: none;
+  padding: .25rem calc(.75rem + var(--side)); padding-top: max(.25rem, env(safe-area-inset-top)); border-bottom: 1px solid var(--text);
+}
+/* back: the same symbol and look as the chat's back control */
+.pp-back {
+  background: none; border: none; border-radius: var(--radius); min-width: 2.5rem; min-height: 2.5rem;
+  padding: 0 .6rem; cursor: pointer; line-height: 1; font-size: 1.6rem;
+}
+.pp-back:hover { color: var(--text-muted); }
+.pp-title { flex: 1; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pp-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.pp-list {
+  list-style: none; margin: 0; padding: .25rem var(--side); overflow-y: auto;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+}
+.pp-list a {
+  display: flex; gap: .5rem; align-items: baseline; padding: .7rem .75rem; color: var(--text); text-decoration: none;
+  border-left: 3px solid transparent;
+}
+.pp-list a:hover { background: var(--surface); }
+.pp-list a.here { border-left-color: var(--accent-here); background: var(--surface); }
+.pp-row { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.pp-row small { color: var(--text-muted); font-size: .8em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pp-list time { color: var(--text-muted); font-size: .8em; flex: none; }
+.pp-note { margin: .9rem calc(.75rem + var(--side)) 0; color: var(--text-muted); font-size: .85em; }
+.pp-private { margin-top: auto; padding-bottom: .9rem; }
+/* the other person's name: plain white (you = pink, the agent = purple) */
+.pp-msg.pp-in .c-who b { color: var(--text); }
+.pp-state { display: flex; align-items: center; gap: .4rem; margin: .35rem 0 0; color: var(--text-muted); font-size: .8em; }
+.pp-state.bad { color: var(--text); }
+.pp-retry {
+  background: none; border: none; color: inherit; cursor: pointer; padding: .2rem; min-width: 1.8rem; min-height: 1.8rem;
+  display: inline-grid; place-items: center;
+}
+.pp-retry:hover { color: var(--text); }
+.pp-retry svg { width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }

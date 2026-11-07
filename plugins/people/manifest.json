@@ -1,0 +1,31 @@
+{
+  "id": "people",
+  "name": "People",
+  "version": "0.1.0",
+  "contract": 1,
+  "doc": "Person-to-person chat between Sleipnyr instances (trial): signed server-to-server messages, queued while the other side is offline. No agent takes part.",
+  "permissions": {
+    "read": [
+      "peer-message",
+      "file"
+    ],
+    "write": [
+      "peer-message",
+      "file"
+    ],
+    "network": [
+      "peers"
+    ]
+  },
+  "modality": {
+    "title": "People",
+    "doc": "Chat with people on their own Sleipnyr (no agent involved)",
+    "icon": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"9\" cy=\"8\" r=\"3.2\"/><path d=\"M3 19.5c.6-3.3 3-5.2 6-5.2s5.4 1.9 6 5.2\"/><circle cx=\"17\" cy=\"9\" r=\"2.6\"/><path d=\"M16.5 14.4c2.5.2 4.1 1.9 4.5 4.6\"/></svg>"
+  },
+  "web": {
+    "entry": "web/people.js",
+    "styles": [
+      "web/people.css"
+    ]
+  }
+}

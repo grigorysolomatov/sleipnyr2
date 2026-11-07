@@ -173,7 +173,8 @@ tailscale serve status
 Open `https://<server name>.<your tailnet>.ts.net:8443/` on your phone (with
 Tailscale on) and use "Add to home screen" / "Install app". Only devices on
 your tailnet can reach it. Do not use `tailscale funnel` (that would put it
-on the public internet; Sleipnyr 2 has no login of its own yet).
+on the public internet; Sleipnyr 2 has no login of its own yet). The one
+exception is the separate inbox of the `people` plugin, see `docs/PEERS.md`.
 
 ## 3. Connecting a Hermes agent
 

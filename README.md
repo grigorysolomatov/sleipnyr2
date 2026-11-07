@@ -209,6 +209,9 @@ agent's working state a spinner and words, errors a "!" and words).
   dashboard page (trial).
 - `tinder` - the agent suggests tasks as a card stack; swipe right queues a
   Kanban card (needs a Kanban HTTP endpoint, see `docs/AGENTS.md`).
+- `people` - person-to-person chat with other people's Sleipnyr 2
+  instances (trial): signed server-to-server messages, queued while the
+  other side is offline, no agent involved. Pairing: `docs/PEERS.md`.
 - `next-thread` - a bent-arrow icon (top right) in the thread bar: a new thread from the open
   one, Clear (empty) or Continue (the old thread stays visible above it).
   Always a fresh agent session, even while the old thread's run is busy.

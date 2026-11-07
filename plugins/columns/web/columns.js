@@ -246,7 +246,7 @@ export function mount(box, ctx) {
       const prev = icon(LEFT, "Previous column", () => go(-1), "co-prev");
       const next = icon(RIGHT, "Next column", () => go(1), "co-next");
       const list = h("div", { class: "co-list" });
-      const empty = h("p", { class: "co-empty" }, `Nothing here yet. Add a note or a window with + (top right), or ask ${AG}.`);
+      const empty = h("p", { class: "co-empty" }, "Nothing here yet.");
       const el = h("section", { class: "co-col", "data-id": c.id, "data-k-id": c.id, "data-k-kind": "column" }, h("header", { class: "co-chead" }, prev, name, next), list);
       ce = { el, name, prev, next, list, empty }; st.cels.set(c.id, ce);
     }
