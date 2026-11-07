@@ -1,0 +1,10 @@
+{
+  "id": "agent-hermes",
+  "name": "Hermes agents",
+  "version": "1.0.0",
+  "contract": 1,
+  "doc": "Talks to Hermes agents through their API server: one Hermes session per conversation, streamed replies, images as vision input.",
+  "permissions": { "read": [], "write": [], "network": ["plugins.agent-hermes.agents[].url"] },
+  "provides": ["agent"],
+  "commands": []
+}

@@ -1,0 +1,80 @@
+/* Kernel base styles: reset and page frame. Colours come from theme tokens
+   (fallbacks only so the boot message is readable before the theme loads). */
+*, *::before, *::after { box-sizing: border-box; }
+/* wide screens: every view keeps a centred reading column (like 1.0); --side
+   is the empty margin on each side, 0 on a phone. Lines and scrollbars still
+   span the full width; only the content moves in. */
+:root { --page-w: 48rem; --side: max(0px, calc((100vw - var(--page-w)) / 2)); }
+html { margin: 0; height: 100%; color-scheme: dark; scrollbar-color: var(--line, #444) var(--bg, #000); }
+body {
+  margin: 0; height: 100%;
+  background: var(--bg, #000);
+  color: var(--text, #fff);
+  font: var(--font-size, 16px)/1.45 var(--font, system-ui, sans-serif);
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+#app { height: 100dvh; display: flex; flex-direction: column; }
+/* a window on a Blackboard or Columns panel (?frame=1): the parent page's bar talks to it */
+.k-framed > .mb { display: none; }
+/* the view box (the home plugin mounts here) above the shared modality bar */
+.k-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+/* one level at a time: the modality picker or one modality (shell.js levels) */
+.k-level { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+/* the picker: a header with a white line under it, one row per modality; pink = where you came from */
+.k-bar {
+  display: flex; align-items: center; gap: .5rem; min-height: 3rem; flex: none;
+  padding: .25rem calc(.75rem + var(--side)); padding-top: max(.25rem, env(safe-area-inset-top)); border-bottom: 1px solid var(--text, #fff);
+}
+.k-app { flex: 1; font-weight: 600; }
+.k-mods {
+  list-style: none; margin: 0; padding: .25rem var(--side); overflow-y: auto; flex: 1;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+}
+.k-mods a {
+  display: flex; gap: .85rem; align-items: center; padding: .75rem; color: var(--text, #fff); text-decoration: none;
+  border-left: 3px solid transparent;
+}
+.k-mods a:hover { background: var(--surface, #111); }
+.k-mods a.here { border-left-color: var(--accent-here, #f08); background: var(--surface, #111); }
+.k-mod-ic { flex: none; display: inline-grid; place-items: center; width: 2.25rem; height: 2.25rem; }
+.k-mod-ic svg { width: 1.5rem; height: 1.5rem; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.k-mod-t { display: flex; flex-direction: column; min-width: 0; }
+.k-mod-t small { color: var(--text-muted, #888); font-size: .8em; }
+/* a modality's own list of items (kernel itemList, e.g. Columns boards): the thread list's look */
+.k-items {
+  list-style: none; margin: 0; padding: .25rem var(--side); overflow-y: auto; flex: 1;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+}
+.k-items a {
+  display: flex; gap: .5rem; align-items: baseline; padding: .6rem .75rem; color: var(--text, #fff); text-decoration: none;
+  border-left: 3px solid transparent;
+}
+.k-items a:hover { background: var(--surface, #111); }
+.k-items a.here { border-left-color: var(--accent-here, #f08); background: var(--surface, #111); }
+.k-it-t { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.k-items time { color: var(--text-muted, #888); font-size: .8em; }
+.k-it-empty { color: var(--text-muted, #888); font-size: .8em; padding: .75rem; }
+.k-it-arch { border-top: 1px solid var(--text, #fff); margin-top: .25rem; }
+.k-it-arch summary { padding: .6rem .75rem; color: var(--text-muted, #888); font-size: .85em; cursor: pointer; }
+.k-it-arch .k-items { padding: 0; -webkit-mask-image: none; mask-image: none; }
+.boot { margin: auto; color: var(--text-muted, #888); padding: 1rem; text-align: center; }
+.boot.error { color: var(--text, #fff); cursor: pointer; }
+button, input, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent-here, #f08); outline-offset: 2px; }
+[hidden] { display: none !important; }
+/* update offer after a deploy (shell.js watchBuild). Ergonomics: tappable pop-ups sit on the right, low (thumb) */
+.update-bar {
+  position: fixed; right: max(.75rem, env(safe-area-inset-right), calc(.75rem + var(--side))); bottom: calc(5.5rem + env(safe-area-inset-bottom)); z-index: 50; /* right, above the bottom bar: thumb reach */
+  background: var(--bg, #000); color: var(--text, #fff); border: 1px solid var(--text, #fff); border-radius: 999px;
+  padding: .35rem .9rem; font: inherit; font-size: .85em; cursor: pointer; white-space: nowrap;
+}
+/* code-block copy button (text.js): frameless icon top right inside the block */
+pre:has(> .tx-copy) { position: relative; padding-right: 2.6rem !important; }
+pre:has(> .tx-copy) > code { white-space: pre-wrap; overflow-wrap: anywhere; }
+.tx-copy { position: absolute; top: .3rem; right: .3rem; display: grid; place-items: center; width: 2rem; height: 2rem; padding: 0; border: none; border-radius: 6px; background: var(--surface, #000); color: var(--text, #fff); cursor: pointer; }
+.tx-copy:hover { color: var(--text-muted, #888); }
+.tx-copy.done { color: var(--accent-here, #ff0088); }
+.tx-copy svg { width: 1.1rem; height: 1.1rem; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }

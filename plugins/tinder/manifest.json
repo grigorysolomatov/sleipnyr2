@@ -1,0 +1,21 @@
+{
+  "id": "tinder",
+  "name": "Task Tinder",
+  "version": "0.1.0",
+  "contract": 1,
+  "doc": "The agent suggests tasks as a card stack: swipe right to accept (queued as a Kanban card that runs), left to reject (kept, sinks, may come back later).",
+  "permissions": {
+    "read": ["suggestion"],
+    "write": ["suggestion"],
+    "network": ["kanbanUrl"]
+  },
+  "modality": {
+    "title": "Task Tinder",
+    "doc": "Swipe the agent's task suggestions: right = do it, left = not now",
+    "icon": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"7\" y=\"3.5\" width=\"10\" height=\"14\" rx=\"1.5\"/><path d=\"M4 9l-2 2.5L4 14M20 9l2 2.5-2 2.5M9 21h6\"/></svg>"
+  },
+  "web": {
+    "entry": "web/tinder.js",
+    "styles": ["web/tinder.css"]
+  }
+}

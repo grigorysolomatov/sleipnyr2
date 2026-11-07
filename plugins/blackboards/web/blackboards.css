@@ -1,0 +1,145 @@
+/* Blackboards: theme tokens only; white separator lines, pink = where you are
+   (the focused window's frame, the last opened board). Each selector once
+   (tests/css.test.ts). */
+
+:root {
+  --ss-dot: color-mix(in srgb, var(--text) 16%, transparent); /* board grid dots */
+  --ss-win-line: 1px solid var(--line);                        /* window frame; the focused one is pink */
+  --ss-shadow: 0 6px 24px rgba(0, 0, 0, .6);
+  --ss-hl: 3px solid var(--accent-here);                       /* the "look here" frame */
+  --ss-fresh: 2px solid var(--accent-attention);               /* the agent's "new" frame (@new) */
+  --ss-zone-line: 3px dashed color-mix(in srgb, var(--text) 30%, transparent); /* zone frame (board px: stays visible zoomed out) */
+  --ss-zone-fill: color-mix(in srgb, var(--text) 4%, transparent);
+  --ss-zone-size: 1.6rem;                                      /* zone title, readable when zoomed out */
+  --ss-glide: 220ms;                                           /* a dropped window easing into its grid slot */
+  --ss-ease: cubic-bezier(.2, .7, .3, 1);
+}
+
+.ss-level { position: relative; }
+.ss-bar {
+  display: flex; align-items: center; gap: .5rem; min-height: 3rem; flex: none;
+  padding: .25rem .5rem .25rem .75rem; padding-top: max(.25rem, env(safe-area-inset-top)); border-bottom: 1px solid var(--text);
+}
+/* back: the same symbol and look as the other levels' back control */
+.ss-back {
+  background: none; border: none; border-radius: var(--radius); min-width: 2.5rem; min-height: 2.5rem;
+  padding: 0 .6rem; cursor: pointer; line-height: 1; font-size: 1.6rem;
+}
+.ss-back:hover { color: var(--text-muted); }
+.ss-title { flex: 1; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ss-title.ss-ren { cursor: pointer; }
+.ss-zoom {
+  background: none; border: none; color: var(--text-muted); font-size: .8em; min-height: 2.5rem; padding: 0 .4rem; cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+.ss-zoom:hover { color: var(--text); }
+.ss-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
+.ss-note { margin: 0; padding: .35rem .75rem; font-size: .85em; color: var(--text-muted); border-top: 1px solid var(--line); }
+.ss-note.err { color: var(--text); }
+.ss-note.err::before { content: "! "; font-weight: 700; }
+.ss-empty { color: var(--text-muted); font-size: .85em; padding: .75rem; margin: 0; }
+
+/* the session list */
+.ss-list { list-style: none; margin: 0; padding: .25rem 0; }
+.ss-row { display: flex; align-items: center; padding-right: .25rem; }
+.ss-row a {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; padding: .7rem .75rem; color: var(--text); text-decoration: none;
+  border-left: 3px solid transparent;
+}
+.ss-row a b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ss-row a:hover { background: var(--surface); }
+.ss-row a.here { border-left-color: var(--accent-here); background: var(--surface); }
+.ss-row small { color: var(--text-muted); font-size: .8em; }
+.ss-arch { border-top: 1px solid var(--text); /* separators in a view are white */ }
+.ss-arch summary { padding: .6rem .75rem; color: var(--text-muted); font-size: .85em; cursor: pointer; }
+
+/* the add-window picker: a small menu right under the + (locality) */
+.ss-pick {
+  position: absolute; z-index: 30; min-width: 12rem; max-width: min(20rem, calc(100vw - 1rem)); padding: .25rem;
+  display: flex; flex-direction: column; background: var(--bg); border: 1px solid var(--text); border-radius: var(--radius);
+  box-shadow: var(--ss-shadow);
+}
+.ss-pi {
+  background: none; border: none; color: var(--text); text-align: left; padding: .55rem .7rem; border-radius: calc(var(--radius) - 2px);
+  cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ss-pi:hover { background: var(--surface); }
+.ss-pback { color: var(--text-muted); border-bottom: 1px solid var(--line); border-radius: 0; }
+.ss-pscroll { display: flex; flex-direction: column; max-height: 50vh; overflow-y: auto; }
+
+/* the board: an unlimited plane under a dot grid; the plane moves (pan) and scales (zoom) */
+.ss-board {
+  position: relative; flex: 1; min-height: 0; overflow: hidden; cursor: grab; touch-action: none;
+}
+/* the dot grid (= the snap grid): its own layer, moved by transform; it reaches 64px past each edge */
+.ss-dots {
+  position: absolute; inset: -64px; pointer-events: none; will-change: transform;
+  background-image: radial-gradient(circle, var(--ss-dot) 1px, transparent 1.2px); background-size: 24px 24px;
+}
+/* while the view moves, the plane is one compositor layer (no repaint per frame) */
+.ss-board.moving .ss-plane { will-change: transform; }
+.ss-board.panning { cursor: grabbing; }
+.ss-plane { position: absolute; left: 0; top: 0; width: 0; height: 0; transform-origin: 0 0; }
+.ss-hint { position: absolute; left: 2rem; top: 2rem; width: 22rem; cursor: grab; }
+/* zones: a labelled frame behind the windows; it moves and resizes by gliding */
+.ss-zone {
+  position: absolute; z-index: 0; border: var(--ss-zone-line); border-radius: calc(var(--radius) * 2); background: var(--ss-zone-fill); cursor: grab;
+  transition: left var(--ss-glide) var(--ss-ease), top var(--ss-glide) var(--ss-ease), width var(--ss-glide) var(--ss-ease), height var(--ss-glide) var(--ss-ease);
+}
+.ss-zname { position: absolute; left: 1.25rem; top: .9rem; font-size: var(--ss-zone-size); color: var(--text-muted); white-space: nowrap; pointer-events: none; }
+
+/* a window: title bar (drag), its view, a corner grip (resize) */
+.ss-win {
+  position: absolute; display: flex; flex-direction: column; min-width: 200px; cursor: default;
+  background: var(--bg); border: var(--ss-win-line); border-radius: var(--radius); box-shadow: var(--ss-shadow); overflow: hidden;
+}
+.ss-win.here { border-color: var(--accent-here); }
+/* dragged: follows the pointer by transform, lifted; dropped: glides into its grid slot */
+.ss-win.drag { will-change: transform; box-shadow: 0 14px 40px rgba(0, 0, 0, .8); }
+.ss-win.glide { transition: transform var(--ss-glide) var(--ss-ease), width var(--ss-glide) var(--ss-ease), height var(--ss-glide) var(--ss-ease); }
+.ss-ghost { position: absolute; border: 1px dashed var(--text-muted); border-radius: var(--radius); pointer-events: none; }
+/* "look here" (agent highlight): a pink frame outside the window, one at a time */
+.ss-win.hl { outline: var(--ss-hl); outline-offset: 3px; }
+/* "new" (agent @new): a green frame, any number of windows, a tap clears it */
+.ss-win.fresh { outline: var(--ss-fresh); outline-offset: 3px; }
+.ss-win.collapsed { height: auto; }
+.ss-wbar {
+  flex: none; display: flex; align-items: center; gap: 0; min-height: 2.25rem; padding-left: .7rem;
+  border-bottom: 1px solid var(--text); cursor: grab; user-select: none; touch-action: none;
+}
+.ss-win.drag .ss-wbar { cursor: grabbing; }
+.ss-win.collapsed .ss-wbar { border-bottom: none; }
+.ss-wname { flex: 1; min-width: 0; font-size: .85em; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ss-wbar .c-ic { width: 2.1rem; min-width: 2.1rem; min-height: 2.1rem; }
+.ss-wbar .c-ic svg { width: 1.05rem; height: 1.05rem; }
+.ss-wbody { position: relative; flex: 1; min-height: 0; display: flex; overflow: hidden; }
+.ss-win.collapsed .ss-wbody, .ss-win.collapsed .ss-grip { display: none; }
+/* a note window: Markdown (chat's text styles), or its editor */
+.ss-md { flex: 1; min-height: 0; overflow-y: auto; padding: .6rem .8rem 1.2rem; font-size: .92em; line-height: 1.45; }
+.ss-md h3:first-child { margin-top: 0; }
+.ss-mdedit {
+  flex: 1; width: 100%; min-height: 0; resize: none; border: 0; padding: .6rem .8rem; background: var(--bg); color: var(--text);
+  font-family: var(--font-mono); font-size: .85em; line-height: 1.45; outline: none;
+}
+.ss-frame { flex: 1; width: 100%; height: 100%; border: 0; background: var(--bg); }
+/* while dragging or panning, frames must not swallow the pointer */
+.ss-board.busy .ss-frame { pointer-events: none; }
+.ss-grip {
+  position: absolute; right: 0; bottom: 0; width: 1.4rem; height: 1.4rem; display: grid; place-items: center;
+  cursor: nwse-resize; touch-action: none; color: var(--text-muted); z-index: 1;
+}
+.ss-grip svg { width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
+
+/* touch board (phone): one finger pans even over a window until it is tapped
+   (focused, pink); then its content takes touches */
+.ss-board.touch .ss-win:not(.here) .ss-wbody { pointer-events: none; }
+.ss-board.touch .ss-win.here .ss-md { touch-action: pan-y; }
+
+
+/* agent notes: a popover under the memo button (locality) */
+.ss-memo { position: absolute; z-index: 30; width: min(26rem, calc(100vw - 1rem)); max-height: 70vh; overflow-y: auto; padding: .6rem;
+  display: flex; flex-direction: column; gap: .6rem; background: var(--bg); border: 1px solid var(--text); border-radius: var(--radius); box-shadow: var(--ss-shadow); }
+.ss-memoh { margin: 0; color: var(--text-muted); font-size: .85em; }
+.ss-memof { display: flex; flex-direction: column; gap: .2rem; font-size: .8em; color: var(--text-muted); }
+.ss-memota { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: calc(var(--radius) - 2px); padding: .4rem; font: inherit; font-size: 1.1em; resize: vertical; }
+.ss-memob.on { color: var(--accent-here); }

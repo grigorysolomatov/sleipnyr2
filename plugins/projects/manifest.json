@@ -1,0 +1,23 @@
+{
+  "id": "projects",
+  "name": "Projects",
+  "version": "0.1.0",
+  "contract": 1,
+  "doc": "Projects as a way of working with the agent (trial): a project list (from the config), each project a dashboard page. Placeholder panels for now.",
+  "permissions": {
+    "read": [],
+    "write": [],
+    "network": []
+  },
+  "modality": {
+    "title": "Projects",
+    "doc": "Your projects, each with its own dashboard (trial, placeholder panels)",
+    "icon": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"3.5\" y=\"4\" width=\"7\" height=\"7\" rx=\"1.5\"/><rect x=\"13.5\" y=\"4\" width=\"7\" height=\"7\" rx=\"1.5\"/><rect x=\"3.5\" y=\"14\" width=\"7\" height=\"6\" rx=\"1.5\"/><rect x=\"13.5\" y=\"14\" width=\"7\" height=\"6\" rx=\"1.5\"/></svg>"
+  },
+  "web": {
+    "entry": "web/projects.js",
+    "styles": [
+      "web/projects.css"
+    ]
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "id": "columns",
+  "name": "Columns",
+  "version": "0.1.0",
+  "contract": 1,
+  "doc": "Columns: named columns side by side, one per topic you keep in mind. Each column is a list of foldable panels (notes and windows into threads, Task Tinder, Projects, files, web pages); hold a panel's title and drag to reorder, swipe or use the arrows to change column. The agent arranges them through the bar.",
+  "permissions": {
+    "read": ["columns", "thread", "file"],
+    "write": ["columns", "file"],
+    "network": []
+  },
+  "modality": {
+    "title": "Columns",
+    "doc": "Named columns of foldable panels, one per topic; swipe between them",
+    "icon": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"3\" y=\"3.5\" width=\"5\" height=\"17\" rx=\"1.2\"/><rect x=\"9.5\" y=\"3.5\" width=\"5\" height=\"17\" rx=\"1.2\"/><rect x=\"16\" y=\"3.5\" width=\"5\" height=\"17\" rx=\"1.2\"/><path d=\"M3 7.5h5M9.5 7.5h5M16 7.5h5\"/></svg>"
+  },
+  "web": {
+    "entry": "web/columns.js",
+    "styles": ["web/columns.css"]
+  }
+}

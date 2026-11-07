@@ -1,0 +1,10 @@
+{
+  "id": "transcribe-http",
+  "name": "Speech to text over HTTP",
+  "version": "1.0.0",
+  "contract": 1,
+  "doc": "Provides the transcribe service by posting the audio to a speech-to-text endpoint (tools/transcribe or any service with the same request/response).",
+  "permissions": { "read": [], "write": [], "network": ["plugins.transcribe-http.url"] },
+  "provides": ["transcribe"],
+  "commands": []
+}

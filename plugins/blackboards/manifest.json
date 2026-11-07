@@ -1,0 +1,30 @@
+{
+  "id": "blackboards",
+  "name": "Blackboards",
+  "version": "0.1.0",
+  "contract": 1,
+  "doc": "Blackboards: overview boards with unlimited room to pan and zoom, the same on phone and desktop. Each holds windows into other views (chat threads, the thread list, Task Tinder, Projects, files and PDFs, web pages) and notes that you place freely, resize and fold; the layout is saved in the board.",
+  "permissions": {
+    "read": [
+      "session",
+      "thread",
+      "file"
+    ],
+    "write": [
+      "session",
+      "file"
+    ],
+    "network": []
+  },
+  "modality": {
+    "title": "Blackboards",
+    "doc": "Free boards of windows and notes; pan, zoom, place anywhere",
+    "icon": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"2.5\" y=\"3.5\" width=\"10\" height=\"8\" rx=\"1.5\"/><rect x=\"14.5\" y=\"7.5\" width=\"7\" height=\"6\" rx=\"1.5\"/><rect x=\"6.5\" y=\"14\" width=\"9\" height=\"6.5\" rx=\"1.5\"/><path d=\"M2.5 6.5h10M14.5 10h7M6.5 16.5h9\"/></svg>"
+  },
+  "web": {
+    "entry": "web/blackboards.js",
+    "styles": [
+      "web/blackboards.css"
+    ]
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "next-thread",
+  "name": "Next thread",
+  "version": "1.0.0",
+  "contract": 1,
+  "doc": "Starts a new thread from the open one: Clear = a fresh empty thread, Continue = the new thread shows the old one above it. Either way a fresh agent session that never waits on the old thread's run.",
+  "permissions": { "read": ["thread", "message"], "write": ["thread"], "network": [] },
+  "commands": [
+    { "name": "next-thread", "doc": "New thread from this one: Clear or Continue" }
+  ],
+  "web": { "entry": "web/next.js", "styles": ["web/next.css"] }
+}

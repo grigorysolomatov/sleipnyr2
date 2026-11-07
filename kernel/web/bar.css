@@ -1,0 +1,124 @@
+/* The modality bar (kernel/web/bar.js): the bottom bar every view shares,
+   plus the themed tooltips. Theme tokens only. To try a look, change a value
+   in :root; do not append override rules (tests/css.test.ts: each selector
+   once). */
+
+:root {
+  --rec-color: var(--accent-here);   /* recording level bars and timer */
+  --rec-dot: none;                   /* recording dot: none = hidden, inline-block = shown */
+  --modes-align: center;             /* bar buttons: center, or flex-end for the thumb side */
+  --modes-gap: 1.25rem;              /* space between the bar buttons */
+  --icon-frame: transparent;         /* frame of the bar buttons (hover shows a faint one) */
+  --bar-line: 1px solid var(--text); /* line above the bar: white, like every separator */
+}
+
+.mb-btn {
+  background: none; border: 1px solid var(--line); border-radius: var(--radius); min-width: 2.5rem; min-height: 2.5rem;
+  padding: 0 .6rem; cursor: pointer; line-height: 1;
+}
+.mb-btn:hover { border-color: var(--text-muted); }
+/* which view the bar talks to: only while several are on screen (PC); pink = you are here */
+.mb-to {
+  position: absolute; left: 0; bottom: 0; max-width: 28%; z-index: 1; border-color: transparent; color: var(--accent-here); font-size: .85em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.mb-to::before { content: "→ "; }
+.mb.typing .mb-to, .mb.rec .mb-to { display: none; }
+/* drop images anywhere in the app */
+#app.mb-drop { position: relative; }
+#app.mb-drop::after {
+  content: "Drop images to attach"; position: absolute; inset: .5rem; display: grid; place-items: center; z-index: 40;
+  border: 2px dashed var(--text-muted); border-radius: var(--radius); background: var(--bg); opacity: .92; pointer-events: none;
+}
+
+/* Three states, one row each:
+     idle       attach, keyboard, mic (mic rightmost, nearest the thumb)
+     typing     X, text field, send
+     recording  X, level bars + timer (centred), send
+   The send feedback is the message sliding in; the bar itself does not flash. */
+.mb {
+  position: relative; border-top: var(--bar-line);
+  padding: .5rem calc(.5rem + var(--side)) max(.5rem, env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: .4rem;
+}
+.mb.busy { opacity: .6; }
+/* the + choice, right above the buttons: gallery photos or any file */
+.mb-pick { display: flex; justify-content: center; gap: .5rem; }
+.mb-pick[hidden] { display: none; }
+/* Queue / Send now, right above the send button (pink frame = the default) */
+.mb-when {
+  position: absolute; right: 0; bottom: calc(100% + .5rem); z-index: 30; display: flex; gap: .5rem; padding: .4rem;
+  background: var(--bg); border: 1px solid var(--text); border-radius: var(--radius); white-space: nowrap;
+}
+.mb-when .mb-def { border-color: var(--accent-here); }
+.mb-row { position: relative; display: flex; align-items: flex-end; gap: .4rem; }
+.mb-modes { display: flex; gap: var(--modes-gap); flex: 1; justify-content: var(--modes-align); }
+.mb-modes .mb-attach { order: 1; } .mb-modes .mb-keys { order: 2; } .mb-modes .mb-mic { order: 3; }
+.mb-attach { font-size: 1.3rem; }
+.mb-ic { display: inline-grid; place-items: center; padding: 0; width: 2.75rem; }
+.mb-ic svg { width: 1.35rem; height: 1.35rem; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.mb .mb-ic, .mb .mb-attach { border-color: var(--icon-frame); }
+.mb .mb-ic:hover, .mb .mb-ic:focus-visible,
+.mb .mb-attach:hover, .mb .mb-attach:focus-visible,
+.mb-rec > .mb-btn:hover, .mb-rec > .mb-btn:focus-visible { border-color: var(--line); }
+.mb-input {
+  display: none; /* shown while typing */ flex: 1; min-width: 0; resize: none; min-height: 2.5rem; max-height: 40vh; padding: .5rem .6rem; background: var(--bg);
+  border: 1px solid var(--line); border-radius: var(--radius); line-height: 1.4;
+}
+.mb-input:focus { outline: none; border-color: var(--text-muted); }
+
+/* which controls each state shows */
+.mb-send, .mb-close { display: none; }
+.mb.typing .mb-input { display: block; }
+.mb.typing .mb-close { display: inline-block; border-color: transparent; }
+.mb.typing .mb-send, .mb.has-files .mb-send, .mb.rec .mb-send { display: inline-grid; }
+.mb.typing .mb-modes { display: none; }
+.mb.rec .mb-modes, .mb.rec .mb-input, .mb.rec .mb-close { display: none; }
+
+/* recording: the spacer after the bars + timer balances the X, so they sit centred;
+   the hint shows only as the no-signal warning */
+.mb-rec { flex: 1; display: flex; align-items: center; justify-content: center; gap: .6rem; min-height: 2.5rem; }
+.mb-rec::after { content: ""; order: 9; margin-left: auto; width: 0; }
+.mb-rec > .mb-btn { margin-right: auto; border-color: var(--icon-frame); }
+.mb-rec > b { order: 2; color: var(--rec-color); }
+.mb-rec small { order: 3; color: var(--text-muted); }
+.mb-rec:not(.quiet) small { display: none; }
+.mb-rec.quiet small { color: var(--accent-here); }
+.mb-dot { display: var(--rec-dot); width: 9px; height: 9px; border-radius: 50%; background: var(--text); animation: mb-recdot 1.2s ease-in-out infinite; }
+@keyframes mb-recdot { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+.mb-lv { order: 1; display: inline-flex; align-items: center; gap: 2px; height: 18px; }
+.mb-lv u { display: block; width: 3px; height: 18px; background: var(--rec-color); border-radius: 1px; transform: scaleY(.15); transition: transform 60ms linear; }
+.mb-rec.quiet .mb-lv u { background: var(--text-muted); }
+
+.mb-tray { display: flex; gap: .4rem; overflow-x: auto; }
+.mb-tray figure { position: relative; margin: 0; flex: none; }
+.mb-tray img { height: 4.5rem; border-radius: var(--radius); border: 1px solid var(--line); display: block; }
+.mb-tray figure.bad img { opacity: .4; }
+.mb-tray .mb-btn { position: absolute; top: .15rem; right: .15rem; min-width: 1.6rem; min-height: 1.6rem; padding: 0; background: var(--bg); }
+/* a non-image attachment: file symbol, name, size (images show as thumbnails) */
+.mb-tray .mb-chip {
+  display: grid; grid-template-columns: auto 1fr; align-content: center; column-gap: .45rem; height: 4.5rem; width: 10.5rem;
+  padding: 0 2rem 0 .6rem; box-sizing: border-box; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg);
+}
+.mb-chip svg { grid-row: span 2; width: 1.4rem; height: 1.4rem; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.mb-chip span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: .85rem; }
+.mb-chip small { color: var(--text-muted); font-size: .75rem; }
+.mb-tray .mb-chip.bad { opacity: .4; }
+
+.mb-note { color: var(--text-muted); font-size: .85em; padding: 0 .25rem; }
+.mb-note.bad { color: var(--text); }
+.mb-note.bad::before { content: "! "; font-weight: 700; }
+.mb-note a { color: var(--text); }
+.k-tip {
+  position: fixed; z-index: 60; max-width: 16rem; padding: .3rem .55rem; font-size: .8rem; pointer-events: none;
+  background: var(--bg); color: var(--text); border: 1px solid var(--text); border-radius: var(--radius);
+}
+
+/* declared agent actions: while an agent's effect runs on screen, a stop control above the bar */
+.k-fx-stop {
+  position: fixed; left: 50%; bottom: calc(5.5rem + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 55;
+  display: flex; align-items: center; gap: .4rem; padding: .35rem .8rem; font: inherit; font-size: .85rem; cursor: pointer;
+  background: var(--bg); color: var(--text); border: 1px solid var(--text); border-radius: var(--radius);
+}
+.k-fx-stop[hidden] { display: none; }
+.k-fx-stop svg { width: .9rem; height: .9rem; fill: var(--accent-here); }
+.k-fx-stop:hover { border-color: var(--accent-here); }

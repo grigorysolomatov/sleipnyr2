@@ -1,0 +1,97 @@
+{
+  "id": "chat",
+  "name": "Chat",
+  "version": "1.0.0",
+  "contract": 1,
+  "doc": "Threads with an agent: each thread is a fresh agent session. Text, voice messages (transcribed on the server) and images (paste, drop or pick).",
+  "permissions": {
+    "read": ["thread", "message", "file"],
+    "write": ["thread", "message", "file"],
+    "network": []
+  },
+  "needs": ["agent", "transcribe"],
+  "actions": [
+    {
+      "name": "blink", "level": "look",
+      "doc": "Blink something on the open thread list so the user sees where to look. target: \"selection\" (the thread that is open or was last opened), \"list\" (the whole list) or a thread id. Runs on every open Sleipnyr page showing the list; the page's stop control or a reload ends it.",
+      "params": {
+        "target": {"type": "string", "doc": "\"selection\", \"list\" or a thread id", "pattern": "selection|list|[A-Za-z0-9_-]{1,80}", "default": "selection"},
+        "times": {"type": "integer", "doc": "how many blinks", "min": 1, "max": 20, "default": 3},
+        "interval_ms": {"type": "integer", "doc": "time from one blink to the next, ms", "min": 150, "max": 3000, "default": 500},
+        "colours": {"type": "array", "items": "string", "doc": "blink colours, used in turn (CSS hex or a colour name)", "min": 1, "max": 4, "pattern": "#[0-9a-fA-F]{3,8}|[a-z]{3,20}", "default": ["#ffdd00"]}
+      }
+    },
+    {
+      "name": "glow", "level": "look",
+      "doc": "Make thread list entries glow in a smoothly cycling rainbow (continuous hue, each row a little out of phase) for a while. target: \"list\" (every entry, default), \"selection\" or a thread id. The page's stop control or a reload ends it.",
+      "params": {
+        "target": {"type": "string", "doc": "\"list\", \"selection\" or a thread id", "pattern": "selection|list|[A-Za-z0-9_-]{1,80}", "default": "list"},
+        "style": {"type": "string", "doc": "glow style", "pattern": "rainbow", "default": "rainbow"},
+        "duration_ms": {"type": "integer", "doc": "how long it glows, ms", "min": 1000, "max": 120000, "default": 15000},
+        "cycle_ms": {"type": "integer", "doc": "time for one full colour cycle, ms", "min": 1000, "max": 20000, "default": 4000}
+      }
+    },
+    {
+      "name": "highlight", "level": "look",
+      "doc": "Mark threads in the list (thin frame, pink by default, any colour on request, with a light tint; the reason shows as their tooltip) for a while, e.g. to show which threads a question is about. Call it several times at once with different colours to group threads (red/green/blue...); a later call on the same id takes it over.",
+      "params": {
+        "ids": {"type": "array", "items": "string", "doc": "thread ids from the list", "min": 1, "max": 20, "pattern": "[A-Za-z0-9_-]{1,80}"},
+        "reason": {"type": "string", "doc": "why they are marked, a few words", "max": 120, "default": ""},
+        "color": {"type": "string", "doc": "frame colour: a CSS colour name (green, red, blue, orange...) or #hex; empty = pink", "pattern": "[a-zA-Z]{3,24}|#[0-9a-fA-F]{3,8}", "default": ""},
+        "duration_ms": {"type": "integer", "doc": "how long the mark stays, ms", "min": 1000, "max": 120000, "default": 15000}
+      },
+      "required": ["ids"]
+    },
+    {
+      "name": "select", "level": "look",
+      "doc": "Move the list's selection bar (the pink 'you are here' row) through the given thread ids in order, one step every step_ms, repeated loops times, then put it back on the open thread. Repeats are allowed, so a zigzag is just the ids up then down. Visual only: it opens nothing. A later select call takes over.",
+      "params": {
+        "ids": {"type": "array", "items": "string", "doc": "thread ids in visiting order (may repeat)", "min": 1, "max": 80, "pattern": "[A-Za-z0-9_-]{1,80}"},
+        "step_ms": {"type": "integer", "doc": "time on each entry, ms", "min": 100, "max": 10000, "default": 500},
+        "loops": {"type": "integer", "doc": "how often to run the sequence", "min": 1, "max": 20, "default": 1}
+      },
+      "required": ["ids"]
+    },
+    {
+      "name": "scroll", "level": "look",
+      "doc": "Scroll a chat view on the user's open pages without reloading. Either jump smoothly to one message (to = a message id, e.g. m_ab12cd34ef; in view \"list\" a thread id) or, with no `to`, scroll continuously at speed px_per_s in direction up/down for duration_ms (a slow read-along is about 10-40 px/s). Continuous scrolling ends when the user touches/wheels/clicks that area or presses a key, at the end of the content, at duration_ms, on the stop control or a reload; a later scroll call on the same view takes over. Message ids: every turn note lists the recent ones (\"[Sleipnyr message ids ...]\"); all of a thread's messages: GET /p/chat/threads/<thread id>/messages on the Sleipnyr API.",
+      "params": {
+        "view": {"type": "string", "doc": "which area scrolls: \"thread\" (the open conversation, default), \"list\" (the thread list) or \"embedded\" (the list's embedded chat)", "enum": ["thread", "list", "embedded"], "default": "thread"},
+        "to": {"type": "string", "doc": "message id (thread/embedded) or thread id (list) to bring into view; empty = continuous scroll", "pattern": "|[A-Za-z0-9_-]{1,80}", "default": ""},
+        "block": {"type": "string", "doc": "with `to`: where the target lands in the view", "enum": ["start", "center", "end", "nearest"], "default": "center"},
+        "direction": {"type": "string", "doc": "continuous scroll: \"down\" (towards newer) or \"up\"", "enum": ["down", "up"], "default": "down"},
+        "px_per_s": {"type": "number", "doc": "continuous scroll speed, CSS pixels per second", "min": 1, "max": 3000, "default": 20},
+        "duration_ms": {"type": "integer", "doc": "continuous scroll: how long at most, ms", "min": 200, "max": 600000, "default": 10000}
+      }
+    },
+    {
+      "name": "mark", "level": "look",
+      "doc": "Mark parts of the chat on the user's open pages for a while: a whole message or just one part of it (its voice player, time, sender name, text, transcript, attachment), or a thread row in the list. Generic look: style frame | tint | underline | pulse, in any CSS colour, with an optional reason that becomes the tooltip on that part. Use it to point at \"that voice message\", group things by colour (call it several times with red/green/blue...; marks coexist), or underline a time. A later call on the same target + part takes it over (e.g. change its colour). Marks clear at duration_ms, on the stop control or a reload. Targets are \"<id>\" or \"<id>:<part>\"; message ids come from the turn note (\"[Sleipnyr message ids ...]\") or GET /p/chat/threads/<thread id>/messages; thread ids (t_...) mark a list row.",
+      "params": {
+        "targets": {"type": "array", "items": "string", "doc": "\"<message id>\", \"<message id>:<part>\" or \"<thread id>\" (a list row). part: whole, voice, time, name, text, transcript, attachment; without one the `part` param applies", "min": 1, "max": 40, "pattern": "[A-Za-z0-9_-]{1,80}(:(whole|voice|time|name|text|transcript|attachment))?"},
+        "part": {"type": "string", "doc": "default part for targets that name none", "enum": ["whole", "voice", "time", "name", "text", "transcript", "attachment"], "default": "whole"},
+        "style": {"type": "string", "doc": "frame = outline; tint = coloured background + halo; underline = line under it; pulse = a glow that beats", "enum": ["frame", "tint", "underline", "pulse"], "default": "frame"},
+        "color": {"type": "string", "doc": "any CSS colour: a name (red, green, orange...), #hex, rgb()/hsl()/oklch(); empty = pink", "pattern": "|#[0-9a-fA-F]{3,8}|[a-zA-Z]{3,24}|(rgb|rgba|hsl|hsla|oklch|oklab|lab|lch|hwb)\\([0-9a-zA-Z.,%/ +-]{1,80}\\)", "default": ""},
+        "reason": {"type": "string", "doc": "why it is marked, a few words; shown as the tooltip on the marked part", "max": 120, "default": ""},
+        "duration_ms": {"type": "integer", "doc": "how long the mark stays, ms", "min": 1000, "max": 600000, "default": 20000}
+      },
+      "required": ["targets"]
+    },
+    {
+      "name": "reply_open", "level": "look",
+      "doc": "Unfold the thread list's embedded chat (the reply above the bar) so the user sees the answer."
+    }
+  ],
+  "commands": [
+    { "name": "new-thread", "doc": "Start a new thread with the default agent", "key": "Alt+N" },
+    { "name": "threads", "doc": "Show the thread list", "key": "Alt+T" },
+    { "name": "voice", "doc": "Record a voice message (again to send)", "key": "Alt+V" },
+    { "name": "attach", "doc": "Attach images from the gallery or disk" }
+  ],
+  "modality": {
+    "title": "Threads",
+    "doc": "Conversations with the agent, one thread each",
+    "icon": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4 5h16v11H9l-5 4z\"/><path d=\"M8 9h8M8 12h5\"/></svg>"
+  },
+  "web": { "entry": "web/chat.js", "styles": ["web/chat.css"] }
+}

@@ -1,0 +1,17 @@
+/* Hands-free talk: the sound-wave icon in the thread bar and the list
+   header, and its small status panel right under it. Theme tokens only. */
+
+.tk-btn.on { color: var(--accent-here); }
+.tk-panel {
+  position: absolute; z-index: 20; display: flex; align-items: center; gap: .5rem;
+  max-width: calc(100% - 8px); padding: .25rem .25rem .25rem .6rem; background: var(--bg);
+  border: 1px solid var(--text); border-radius: var(--radius);
+}
+.tk-panel[hidden] { display: none; }
+.tk-word { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: .9em; }
+.tk-panel[data-state="off"] .tk-lv, .tk-panel[data-state="off"] .tk-pause { display: none; }
+.tk-lv { display: inline-flex; align-items: center; gap: 2px; height: 18px; flex: none; }
+.tk-lv u { display: block; width: 3px; height: 18px; background: var(--text-muted); border-radius: 1px; transform: scaleY(.15); transition: transform 60ms linear; }
+.tk-panel[data-state="hear"] .tk-lv u { background: var(--accent-here); }
+.tk-panel[data-state="speak"] .tk-lv u { background: var(--accent-agent); }
+.tk-pause, .tk-end { min-height: 2.25rem; }

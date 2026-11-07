@@ -1,0 +1,59 @@
+{
+  "listen": { "host": "127.0.0.1", "port": 8180 },
+  "dataDir": "data",
+  "app": { "name": "Sleipnyr 2", "shortName": "Sleipnyr 2", "home": "chat", "agentName": "Agent" },
+  "user": { "id": "me", "name": "Me" },
+  "plugins": {
+    "theme": {},
+    "agent-hermes": {
+      "agents": [
+        { "id": "main", "name": "Agent", "url": "http://127.0.0.1:8642", "keyEnv": "HERMES_API_KEY", "titlePrefix": "sleipnyr2" }
+      ],
+      "timeoutSeconds": 600,
+      "filesUrl": "http://127.0.0.1:8180/k/files"
+    },
+    "transcribe-http": { "url": "http://127.0.0.1:8181/api/transcribe", "timeoutSeconds": 1200 },
+    "chat": {
+      "agent": "main",
+      "apiUrl": "http://127.0.0.1:8180",
+      "agentFiles": { "url": "http://127.0.0.1:9122", "keyEnv": "AGENT_FILES_KEY" }
+    },
+    "next-thread": {},
+    "talk": {
+      "hearUrl": "http://127.0.0.1:8181/api/transcribe?fast=1",
+      "speakUrl": "http://127.0.0.1:8182/api/speak",
+      "maxSeconds": 120
+    },
+    "blackboards": {},
+    "columns": {},
+    "projects": {
+      "list": [
+        { "id": "garden", "title": "Garden", "doc": "Beds, seeds, watering plan" },
+        { "id": "thesis", "title": "Thesis", "doc": "Chapters, experiments, revisions" }
+      ]
+    },
+    "tinder": {
+      "kanbanUrl": "http://127.0.0.1:9120",
+      "keyEnv": "KANBAN_PROXY_KEY",
+      "assignee": "default",
+      "defaultBoard": "default",
+      "cooldownHours": 24,
+      "defaultTier": "default",
+      "apiUrl": "http://127.0.0.1:8180",
+      "sources": "the notes folder /srv/notes",
+      "tiers": {
+        "default": { "label": "Default model", "doc": "the assignee profile's own model" },
+        "strong": { "label": "Strong model", "model": "your-strong-model", "provider": "your-provider", "doc": "hard or open-ended tasks" }
+      },
+      "rules": [
+        "Hard rule: no email or contact with anyone without {user}'s per-message OK. Produce drafts only; never send."
+      ]
+    }
+  },
+  "actions": {
+    "ackMs": 2500,
+    "agents": {
+      "main": { "keyEnv": "SLEIPNYR2_MCP_KEY", "grants": { "chat": "look", "view": "act" } }
+    }
+  }
+}

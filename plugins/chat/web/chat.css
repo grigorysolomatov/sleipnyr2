@@ -1,0 +1,202 @@
+/* Chat styles: theme tokens only (no raw colours). Accents are rare and
+   always carry a shape or label too: here = left bar, agent = spinner + text,
+   error = "!" + text.
+
+   To try a look, change a value in the :root block below; do not append
+   override rules further down. Each selector is defined once (tests/css.test.ts
+   checks it and a duplicate fails the deploy). */
+
+:root {
+  --status-color: var(--text-muted); /* transcribing / working line + spinner; was pink (you) / purple (agent) */
+  --divider: 1px solid var(--line);  /* line between messages and above the bottom bar */
+  --log-fade: 14px;                  /* messages fade out over this height at the top and bottom rules */
+  --strip-max: 60%;                  /* height of the embedded chat when opened (until dragged) */
+  --rule: 1px solid var(--text);     /* white separator lines: under the bars, around the embedded chat */
+}
+
+/* ---------------------------------------------------------------- frame */
+
+.c-shell { flex: 1; display: flex; min-height: 0; }
+/* one view at a time on every screen (as on the phone and in 1.0): the list, or a thread with a back arrow */
+.c-side { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.c-main { flex: 1; display: none; flex-direction: column; min-width: 0; position: relative; }
+.c-shell.thread-open .c-side { display: none; }
+.c-shell.thread-open .c-main { display: flex; }
+
+.c-bar {
+  display: flex; align-items: center; gap: .5rem; min-height: 3rem;
+  padding: .25rem calc(.75rem + var(--side)); padding-top: max(.25rem, env(safe-area-inset-top)); border-bottom: var(--rule);
+}
+.c-app { flex: 1; font-weight: 600; }
+.c-title { cursor: pointer; flex: 1; margin: 0; font-size: 1rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.c-btn {
+  background: none; border: 1px solid var(--line); border-radius: var(--radius); min-width: 2.5rem; min-height: 2.5rem;
+  padding: 0 .6rem; cursor: pointer; line-height: 1;
+}
+.c-btn:hover { border-color: var(--text-muted); }
+.c-back { border: none; font-size: 1.6rem; }
+/* up to the modality picker, on the thread list header: the same symbol as back */
+.c-up { border: none; font-size: 1.6rem; }
+/* header icons (extensions' thread-bar buttons): stroked symbols like the bar's */
+.c-ic { display: inline-grid; place-items: center; padding: 0; width: 2.75rem; border: none; }
+.c-ic:hover { color: var(--text-muted); }
+.c-ic svg { width: 1.35rem; height: 1.35rem; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ---------------------------------------------------------------- thread list */
+
+.c-threads {
+  list-style: none; margin: 0; padding: .25rem var(--side); overflow-y: auto; flex: 1; /* fades into the white lines above and below */
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 var(--log-fade), #000 calc(100% - var(--log-fade)), transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 var(--log-fade), #000 calc(100% - var(--log-fade)), transparent 100%);
+}
+.c-threads a {
+  display: flex; gap: .5rem; align-items: baseline; padding: .6rem .75rem; color: var(--text); text-decoration: none;
+  border-left: 3px solid transparent;
+}
+.c-threads a:hover { background: var(--surface); }
+.c-threads a.here { border-left-color: var(--accent-here); /* convention: where you are = pink */ background: var(--surface); }
+.c-threads a.marked { box-shadow: inset 0 0 0 1px var(--mark, var(--accent-here)); background: color-mix(in srgb, var(--mark, transparent) 14%, transparent); /* the agent points at it (action chat_highlight) */ }
+.c-t { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.c-threads time { color: var(--text-muted); font-size: .8em; }
+.c-empty { color: var(--text-muted); font-size: .8em; padding: .75rem; }
+/* The embedded chat: the list's conversation, pinned between the list and the
+   bar. Collapsed: one line (last answer + tools); .open: a header over the
+   whole conversation, any height (drag). White lines frame it; the list above
+   and its own log fade into them. */
+.c-strip { position: relative; flex: none; display: flex; flex-direction: column; border-top: var(--rule); background: var(--bg); transition: box-shadow .3s; }
+.c-strip.fresh { box-shadow: inset 3px 0 0 var(--accent-here); /* a new answer: pink = look here */ }
+body:has(.c-shell:not(.thread-open) .c-strip:not([hidden])) { --bar-line: var(--rule); /* the bar's top line is the strip's bottom line */ }
+.c-strip-row { display: flex; align-items: center; padding: 0 calc(.25rem + var(--side)) 0 var(--side); touch-action: none; }
+.c-strip-line {
+  flex: 1; min-width: 0; display: flex; gap: .5rem; align-items: center; min-height: 2.5rem; padding: .3rem .75rem; text-align: left;
+  background: none; border: none; cursor: pointer; font-size: .85em; color: var(--text); touch-action: none;
+}
+.c-strip-line:hover { background: var(--surface); }
+.c-strip-line.quiet { color: var(--text-muted); }
+.c-strip-line .c-spin { flex: none; }
+.c-strip-line .c-el { flex: none; }
+.c-strip-t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.c-strip.busy .c-strip-t { color: var(--status-color); }
+.c-strip-tools { flex: none; display: flex; align-items: center; }
+.c-strip:not(.open) .c-strip-tools { display: none; /* collapsed = the answer line only; the icons come with the opened view */ }
+.c-strip-head { position: relative; display: none; align-items: center; gap: .25rem; min-height: 2.5rem; padding: 0 calc(.25rem + var(--side)) 0 calc(.35rem + var(--side)); cursor: grab; touch-action: none; user-select: none; }
+.c-strip.drag .c-strip-head { cursor: grabbing; }
+.c-strip-head b { flex: 1; font-size: .85em; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.c-strip-head .c-btn { border: none; }
+.c-strip-head .c-btn:hover { color: var(--text-muted); }
+.c-strip-grip { position: absolute; top: 4px; left: 50%; width: 2.25rem; height: 3px; transform: translateX(-50%); border-radius: 2px; background: var(--line); }
+.c-strip-log {
+  display: none; overflow-y: auto; padding: .75rem var(--side); flex-direction: column; gap: .9rem; font-size: .92em;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 var(--log-fade)); mask-image: linear-gradient(to bottom, transparent 0, #000 var(--log-fade));
+}
+.c-strip-msgs { display: flex; flex-direction: column; gap: .9rem; }
+.c-strip.open { height: var(--strip-h, var(--strip-max)); }
+.c-strip.open .c-strip-head { display: flex; border-bottom: var(--rule); /* on the head: the log's fade mask would hide its own top border */ }
+.c-strip.open .c-strip-log { display: flex; flex: 1; min-height: 0; }
+.c-strip.open .c-strip-row { display: none; }
+
+.c-jump { position: absolute; right: calc(.75rem + var(--side)); bottom: .75rem; z-index: 5; width: 2.5rem; height: 2.5rem; border-radius: 50%; background: var(--bg); box-shadow: inset 0 0 0 1px var(--text); color: var(--text); /* jump to latest: black fill, white outline */ }
+.c-jump[hidden] { display: none; }
+
+/* ---------------------------------------------------------------- messages */
+
+/* Discord-style: every message on the left, a name line on top; dividers span
+   the full width, the content stays readable (46rem). */
+.c-log {
+  flex: 1; overflow-y: auto; padding: 1rem var(--side); display: flex; flex-direction: column; gap: .9rem;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 var(--log-fade), #000 calc(100% - var(--log-fade)), transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 var(--log-fade), #000 calc(100% - var(--log-fade)), transparent 100%);
+}
+/* a short thread sits at the bottom, next to the bar, so new messages glide up from where the last one landed */
+.c-log > :first-child { margin-top: auto; }
+.c-hello { margin: auto; color: var(--text-muted); text-align: center; }
+.c-msg { overflow-wrap: anywhere; align-self: stretch; padding-left: .75rem; padding-right: .75rem; }
+.c-msg + .c-msg { border-top: var(--divider); padding-top: .9rem; }
+.c-msg > * { max-width: 46rem; }
+/* new messages glide up and fade in; a reply waits hidden for its turn */
+.c-msg.c-arrive { animation: c-arrive .55s cubic-bezier(.2, .7, .2, 1) both; }
+@keyframes c-arrive { from { opacity: 0; transform: translateY(var(--rise, 24px)); } to { opacity: 1; transform: none; } }
+.c-msg.c-wait { display: none; }
+
+.c-who { display: flex; align-items: baseline; gap: .5rem; margin-bottom: .2rem; }
+.c-who b { font-weight: 600; color: var(--text); }
+.c-msg.user .c-who b { color: var(--accent-here); }
+.c-msg.agent .c-who b { color: var(--accent-agent); }
+.c-who time { color: var(--text-muted); font-size: .8em; }
+.c-from { color: var(--text-muted); font-size: .75em; }
+
+.c-text > :first-child { margin-top: 0; } .c-text > :last-child { margin-bottom: 0; }
+.c-text p, .c-text ol { margin: .45em 0; }
+.c-text h3 { font-size: 1em; margin: .7em 0 .3em; }
+.c-text a { color: var(--link); }
+.c-text code { font-family: var(--font-mono); font-size: .9em; background: var(--surface); padding: 0 .2em; border-radius: 3px; }
+.c-text pre { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: .6rem; overflow-x: auto; }
+.c-text pre code { background: none; padding: 0; }
+/* list items: first line is the headline, indented lines are greyed details (1.0 style) */
+.c-text ul { margin: .45em 0; list-style: none; padding-left: 1rem; }
+.c-text li { position: relative; margin: 0 0 .5rem; }
+.c-text ul > li::before { content: ""; position: absolute; left: -.75rem; top: .6em; width: 5px; height: 5px; background: var(--text); border-radius: 1px; }
+.c-li-h { color: var(--text); }
+.c-li-d { color: var(--text-muted); font-size: .92em; line-height: 1.45; margin-top: 1px; }
+
+.c-img { display: block; max-width: min(100%, 22rem); max-height: 18rem; border-radius: var(--radius); border: 1px solid var(--line); margin-bottom: .4rem; }
+/* a non-image file: symbol, name, size; tap opens / downloads it */
+.c-fchip {
+  display: inline-grid; grid-template-columns: auto auto; align-items: center; column-gap: .5rem; max-width: min(100%, 22rem);
+  padding: .45rem .7rem; margin-bottom: .4rem; border: 1px solid var(--line); border-radius: var(--radius);
+  color: var(--text); text-decoration: none; background: var(--bg);
+}
+.c-fchip:hover { border-color: var(--text-muted); }
+.c-fchip svg { grid-row: span 2; width: 1.4rem; height: 1.4rem; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.c-fchip span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.c-fchip small { color: var(--text-muted); font-size: .8em; }
+/* voice player: black with a grey outline, app radius instead of a capsule */
+.c-msg audio {
+  display: block; max-width: 100%; height: 2.5rem;
+  background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius);
+}
+.c-msg audio::-webkit-media-controls-enclosure { background: var(--bg); border-radius: var(--radius); }
+.c-msg audio::-webkit-media-controls-panel { background: var(--bg); }
+.c-msg audio::-webkit-media-controls-overflow-button { display: none; }
+.c-voice { display: flex; align-items: center; gap: .4rem; max-width: 100%; }
+.c-voice audio { flex: 0 1 auto; min-width: 0; }
+/* streamed reply text fades in */
+.c-new { animation: c-fadein .5s ease-out both; }
+@keyframes c-fadein { from { opacity: 0; } }
+.c-transcript { margin: .3rem 0 0; color: var(--text-muted); font-size: .9em; font-style: italic; }
+/* status line -> transcript: the message grows (height set inline by chat.js) while the old line fades out */
+.c-msg.c-grow { position: relative; overflow: hidden; flex: none; transition: height .32s cubic-bezier(.2, .7, .2, 1); }
+.c-msg.c-grow .c-ghost { position: absolute; left: .75rem; right: .75rem; margin: 0; pointer-events: none; animation: c-step-out .2s linear both; }
+@media (prefers-reduced-motion: reduce) { .c-msg.c-grow { transition: none; } }
+
+/* status line: spinner, then the timer (never squeezed), then the step text, which wraps */
+.c-working { display: flex; align-items: center; gap: .5rem; margin: .4rem 0 0; color: var(--status-color); font-size: .9em; }
+.c-working .c-el { order: 1; flex: none; white-space: nowrap; }
+.c-working > .c-step { order: 2; flex: 1; min-width: 0; position: relative; line-height: 1.3; height: 2.6em; }
+/* exactly two lines reserved; longer previews are clamped with an ellipsis */
+.c-step-t { position: absolute; inset: 0 0 auto 0; overflow: hidden; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+.c-step-in { animation: c-step-in .22s linear both; }
+.c-step-out { animation: c-step-out .22s linear both; pointer-events: none; }
+@keyframes c-step-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes c-step-out { from { opacity: 1; } to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .c-step-in, .c-step-out { animation: none; } }
+.c-el { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+/* Sleipnyr 1.0 ring: faint full circle, one bright arc on top. */
+.c-spin {
+  display: inline-block; box-sizing: border-box; width: .8em; height: .8em; flex: none; color: var(--status-color);
+  border: 2px solid color-mix(in srgb, var(--status-color) 30%, transparent); border-top-color: var(--status-color);
+  border-radius: 50%; will-change: transform; animation: c-spin .8s linear infinite;
+}
+@keyframes c-spin { to { transform: rotate(360deg); } }
+.c-error { margin: .4rem 0 0; color: var(--text); font-size: .9em; }
+/* stop (square) at the end of a status line, and beside the embedded chat's one line */
+.c-stop { flex: none; width: 2.25rem; min-width: 2.25rem; min-height: 2.25rem; color: var(--text); }
+.c-working .c-stop { order: 3; margin: -.4rem 0; }
+/* what the user stopped: one muted line (stopped, cancelled, added to a running answer) */
+.c-quiet { margin: .35rem 0 0; color: var(--text-muted); font-size: .85em; }
+/* what the agent did on screen this turn (declared actions), one muted line each */
+.c-calls { list-style: none; margin: .35rem 0 0; padding: 0; color: var(--text-muted); font-size: .78em; }
+.c-calls li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.c-error b { display: inline-grid; place-items: center; width: 1.2em; height: 1.2em; border: 1px solid var(--text); border-radius: 50%; font-size: .8em; }
+
+@media (prefers-reduced-motion: reduce) { .c-msg.c-arrive { animation: none; } }

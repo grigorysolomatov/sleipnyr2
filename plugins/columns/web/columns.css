@@ -1,0 +1,107 @@
+/* Columns: theme tokens only; white separator lines, pink = where you are
+   (the focused panel's frame). Each selector once (tests/css.test.ts). */
+
+:root {
+  --co-col-w: 26rem;                                 /* a column on a wide screen; a phone shows one full width */
+  --co-panel-h: 60dvh;                               /* an unfolded window panel */
+  --co-line: 1px solid var(--line);                  /* panel frame; the focused one is pink */
+  --co-hl: 3px solid var(--accent-here);             /* the "look here" frame */
+  --co-fresh: 2px solid var(--accent-attention);     /* the agent's "new" frame (@new) */
+  --co-shadow: 0 6px 24px rgba(0, 0, 0, .6);
+  --co-glide: 220ms;                                 /* panels easing into new places */
+  --co-ease: cubic-bezier(.2, .7, .3, 1);
+}
+
+.co-level { position: relative; }
+.co-bar {
+  display: flex; align-items: center; gap: .5rem; min-height: 3rem; flex: none;
+  padding: .25rem .5rem .25rem .75rem; padding-top: max(.25rem, env(safe-area-inset-top)); border-bottom: 1px solid var(--text);
+}
+/* back: the same symbol and look as the other levels' back control */
+.co-back {
+  background: none; border: none; border-radius: var(--radius); min-width: 2.5rem; min-height: 2.5rem;
+  padding: 0 .6rem; cursor: pointer; line-height: 1; font-size: 1.6rem;
+}
+.co-back:hover { color: var(--text-muted); }
+.co-title { flex: 1; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.co-title.co-ren { cursor: pointer; }
+.co-pos { color: var(--text-muted); font-size: .8em; font-variant-numeric: tabular-nums; }
+.co-note { margin: 0; padding: .35rem .75rem; font-size: .85em; color: var(--text-muted); border-top: 1px solid var(--line); }
+.co-note.err { color: var(--text); }
+.co-note.err::before { content: "! "; font-weight: 700; }
+.co-empty { color: var(--text-muted); font-size: .85em; padding: .75rem; margin: 0; }
+
+/* the add menu: a small menu right under the + (locality) */
+.co-pick {
+  position: absolute; z-index: 30; min-width: 12rem; max-width: min(20rem, calc(100vw - 1rem)); padding: .25rem;
+  display: flex; flex-direction: column; background: var(--bg); border: 1px solid var(--text); border-radius: var(--radius);
+  box-shadow: var(--co-shadow);
+}
+.co-pi {
+  background: none; border: none; color: var(--text); text-align: left; padding: .55rem .7rem; border-radius: calc(var(--radius) - 2px);
+  cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.co-pi:hover { background: var(--surface); }
+.co-ph { margin: .35rem .7rem .1rem; color: var(--text-muted); font-size: .8em; border-top: 1px solid var(--line); padding-top: .4rem; }
+.co-pback { color: var(--text-muted); border-bottom: 1px solid var(--line); border-radius: 0; }
+.co-pscroll { display: flex; flex-direction: column; max-height: 50vh; overflow-y: auto; }
+
+/* the columns: side by side, sideways scrolling that snaps to a column (the swipe) */
+.co-cols {
+  flex: 1; min-height: 0; display: flex; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory; justify-content: safe center; /* wide screen: the set of columns sits in the middle */
+  overscroll-behavior-x: contain; scrollbar-width: thin;
+}
+.co-col {
+  flex: 0 0 min(100%, var(--co-col-w)); min-width: 0; display: flex; flex-direction: column; scroll-snap-align: start;
+  border-right: 1px solid var(--text);
+}
+.co-col.hl { box-shadow: inset 0 0 0 3px var(--accent-here); }
+.co-chead { flex: none; display: flex; align-items: center; min-height: 2.75rem; padding: 0 .25rem; border-bottom: 1px solid var(--text); }
+.co-cname {
+  flex: 1; min-width: 0; background: none; border: none; color: var(--text); font: inherit; font-weight: 600; font-size: 1.05em;
+  padding: .5rem; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center;
+}
+.co-cname:hover { color: var(--text-muted); }
+.co-chead .c-ic:disabled { visibility: hidden; }
+.co-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: .75rem; padding: .75rem; overscroll-behavior-y: contain; }
+
+/* a panel: a title bar (tap folds, hold + drag reorders), then its content */
+.co-panel {
+  position: relative; flex: none; display: flex; flex-direction: column; background: var(--bg);
+  border: var(--co-line); border-radius: var(--radius); overflow: hidden;
+}
+.co-panel.view { height: var(--co-panel-h); }
+.co-panel.collapsed { height: auto; }
+.co-panel.here { border-color: var(--accent-here); }
+.co-panel.hl { outline: var(--co-hl); outline-offset: 3px; }
+.co-panel.fresh { outline: var(--co-fresh); outline-offset: 3px; }
+/* lifted: follows the finger, above the rest; the others glide aside */
+.co-panel.drag { z-index: 5; will-change: transform; box-shadow: 0 14px 40px rgba(0, 0, 0, .8); border-color: var(--text); }
+.co-panel.glide { transition: transform var(--co-glide) var(--co-ease); }
+.co-pbar {
+  flex: none; display: flex; align-items: center; min-height: 2.5rem; padding-left: .75rem; border-bottom: 1px solid var(--text);
+  cursor: grab; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+}
+.co-panel.collapsed .co-pbar { border-bottom: none; }
+.co-panel.drag .co-pbar { cursor: grabbing; }
+.co-pname { flex: 1; min-width: 0; font-size: .9em; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.co-pbar .c-ic { width: 2.2rem; min-width: 2.2rem; min-height: 2.2rem; }
+.co-pbar .c-ic svg { width: 1.05rem; height: 1.05rem; }
+.co-pbody { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.co-panel.collapsed .co-pbody { display: none; }
+.co-md { padding: .6rem .8rem 1rem; font-size: .92em; line-height: 1.45; overflow-wrap: anywhere; }
+.co-md h3:first-child { margin-top: 0; }
+.co-mdedit {
+  width: 100%; min-height: 10rem; field-sizing: content; resize: vertical; border: 0; padding: .6rem .8rem; background: var(--bg); color: var(--text);
+  font-family: var(--font-mono); font-size: .85em; line-height: 1.45; outline: none;
+}
+.co-frame { flex: 1; width: 100%; height: 100%; border: 0; background: var(--bg); }
+/* while a panel is lifted, frames must not swallow the pointer */
+.co-busy .co-frame { pointer-events: none; }
+.co-busy .co-list { scroll-snap-type: none; }
+
+/* touch: a window panel takes touches only once tapped (pink), so a finger
+   over it still scrolls the column or swipes to the next one */
+@media (pointer: coarse) {
+  .co-panel:not(.here) .co-frame { pointer-events: none; }
+}

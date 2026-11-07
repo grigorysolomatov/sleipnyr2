@@ -1,0 +1,12 @@
+{
+  "id": "theme",
+  "name": "Theme",
+  "version": "1.0.0",
+  "contract": 1,
+  "doc": "Serves the active theme as CSS variables. A theme is a saved item of type theme; the most recently changed one is active, so saving or touching another theme swaps the look.",
+  "permissions": { "read": ["theme"], "write": ["theme"], "network": [] },
+  "commands": [
+    { "name": "default-theme", "doc": "Make the default theme active again (saved as a new theme item)" }
+  ],
+  "web": { "styles": ["theme.css"] }
+}
