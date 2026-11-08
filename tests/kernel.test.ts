@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { createApp, fixAudio, type Config } from "../kernel/server.ts";
 import { content, toEvent } from "../plugins/agent-hermes/server.ts";
 import { extractMedia, titleFrom } from "../plugins/chat/server.ts";
-import { clean, css } from "../plugins/theme/server.ts";
+import { clean, css } from "../plugins/settings/server.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "sleipnyr2-test-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -17,7 +17,7 @@ const config: Config = {
   dataDir: dir,
   app: { name: "Test", shortName: "Test", home: "chat" },
   user: { id: "me", name: "Me" },
-  plugins: { theme: {}, "agent-hermes": { agents: [] }, "transcribe-http": { url: "" }, chat: { agent: "stub" } },
+  plugins: { settings: {}, "agent-hermes": { agents: [] }, "transcribe-http": { url: "" }, chat: { agent: "stub" } },
 };
 const app = await createApp(config);
 afterAll(() => app.stop());
@@ -88,7 +88,69 @@ test("plugin web files: typescript converted, no escape from web/", async () => 
 test("manifests are listed with their contract", async () => {
   const info = (await call("GET", "/k/plugins")).body;
   expect(info.contract).toBe(1);
-  expect(info.plugins.map((p: any) => p.id)).toEqual(["theme", "agent-hermes", "transcribe-http", "chat"]);
+  expect(info.plugins.map((p: any) => p.id)).toEqual(["settings", "agent-hermes", "transcribe-http", "chat"]);
+});
+
+// ---------------------------------------------------------------- settings + deletion
+const thread = async (title: string) => {
+  const t = (await call("POST", "/p/chat/threads", { title })).body;
+  return t;
+};
+const addMessage = async (threadId: string, files: string[]) => {
+  const m = (await call("POST", "/k/items", { type: "message", data: { thread: threadId, role: "user", text: "x", files, status: "done" } })).body;
+  await call("POST", "/k/links", { src: m.id, rel: "in", dst: threadId });
+  for (const f of files) await call("POST", "/k/links", { src: m.id, rel: "file", dst: f });
+  return m;
+};
+
+test("settings: kernel item, deletion off by default, features over the config", async () => {
+  const s = (await call("GET", "/k/settings")).body;
+  expect(s.allowDelete).toBe(false);
+  expect((await call("PATCH", "/k/settings", { allowDelete: "yes" })).status).toBe(400);
+  expect((await call("PATCH", "/k/settings", { features: { "bad name": true } })).status).toBe(400);
+  expect((await call("PATCH", "/k/settings", { features: { recent: false } })).body.features.recent).toBe(false);
+  expect((await call("GET", "/k/plugins")).body.settings.features.recent).toBe(false);
+  expect((await call("PATCH", "/k/settings", { features: { recent: null } })).body.features.recent).toBeUndefined();
+});
+
+test("the old theme address still works", async () => {
+  expect((await app.fetch(new Request("http://x/p/theme/theme.css"))).status).toBe(200);
+  expect((await call("GET", "/p/theme/tokens")).status).toBe(200);
+});
+
+test("deleting: refused when off, archived only, shared files survive", async () => {
+  const shared = (await call("POST", "/k/files?name=s.png", new Uint8Array([1, 2, 3]), "image/png")).body.id;
+  const own = (await call("POST", "/k/files?name=o.png", new Uint8Array([4, 5, 6, 7]), "image/png")).body.id;
+  const t = await thread("Delete me");
+  const other = await thread("Keep me");
+  const m = await addMessage(t.id, [shared, own]);
+  await addMessage(other.id, [shared]);
+  await call("PATCH", `/p/chat/threads/${t.id}`, { hidden: true });
+
+  // off (the default): every way refuses
+  expect((await call("DELETE", `/p/chat/threads/${t.id}`)).status).toBe(403);
+  expect((await call("DELETE", `/k/items/${m.id}`)).status).toBe(403);
+  expect((await call("GET", `/k/items/${t.id}`)).status).toBe(200);
+
+  await call("PATCH", "/k/settings", { allowDelete: true });
+  try {
+    // only archived threads
+    expect((await call("DELETE", `/p/chat/threads/${other.id}`)).status).toBe(400);
+    // a file another item still uses is not deleted on its own
+    expect((await call("DELETE", `/k/items/${shared}`)).status).toBe(409);
+    const del = await call("DELETE", `/p/chat/threads/${t.id}`);
+    expect(del.status).toBe(200);
+    expect(del.body).toMatchObject({ messages: 1, files: 1, keptFiles: 1 });
+    expect((await call("GET", `/k/items/${t.id}`)).status).toBe(404);
+    expect((await call("GET", `/k/items/${m.id}`)).status).toBe(404);
+    expect((await call("GET", `/k/items/${own}`)).status).toBe(404);
+    expect((await app.fetch(new Request(`http://x/k/files/${shared}`))).status).toBe(200);
+    expect((await call("GET", `/k/links?src=${m.id}`)).body).toEqual([]);
+    const hidden = (await call("GET", "/p/chat/threads?hidden=1")).body.map((x: any) => x.id);
+    expect(hidden).not.toContain(t.id);
+  } finally {
+    await call("PATCH", "/k/settings", { allowDelete: false });
+  }
 });
 
 test("theme css uses only safe tokens", () => {
@@ -108,16 +170,16 @@ test("theme values are checked: hex colours and pixel sizes in range only", () =
 });
 
 test("theme tokens: a hand change saves to the active theme, null resets, bad values are refused", async () => {
-  const before = (await call("GET", "/p/theme/tokens")).body;
+  const before = (await call("GET", "/p/settings/tokens")).body;
   expect(before.tokens["accent-here"]).toBe("#ff0088");
-  const up = await call("PATCH", "/p/theme/tokens", { tokens: { "accent-here": "#00aaff", radius: "4px" } });
+  const up = await call("PATCH", "/p/settings/tokens", { tokens: { "accent-here": "#00aaff", radius: "4px" } });
   expect(up.status).toBe(200);
   expect(up.body.id).toBe(before.id); // the same theme item, never a delete
-  expect(await (await app.fetch(new Request("http://x/p/theme/theme.css"))).text()).toContain("--accent-here: #00aaff;");
+  expect(await (await app.fetch(new Request("http://x/p/settings/theme.css"))).text()).toContain("--accent-here: #00aaff;");
   for (const bad of [{ "accent-here": "url(x)" }, { font: "x" }, { radius: "100px" }, { "accent-here": "#00ff00", link: "nope" }])
-    expect((await call("PATCH", "/p/theme/tokens", { tokens: bad })).status).toBe(400);
-  expect((await call("GET", "/p/theme/tokens")).body.tokens["accent-here"]).toBe("#00aaff"); // all or nothing
-  const reset = await call("PATCH", "/p/theme/tokens", { tokens: { "accent-here": null, radius: null } });
+    expect((await call("PATCH", "/p/settings/tokens", { tokens: bad })).status).toBe(400);
+  expect((await call("GET", "/p/settings/tokens")).body.tokens["accent-here"]).toBe("#00aaff"); // all or nothing
+  const reset = await call("PATCH", "/p/settings/tokens", { tokens: { "accent-here": null, radius: null } });
   expect(reset.body.tokens["accent-here"]).toBe("#ff0088");
   expect(reset.body.tokens.radius).toBe("8px");
 });

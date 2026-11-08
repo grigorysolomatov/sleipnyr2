@@ -4,7 +4,7 @@
   "app": { "name": "Sleipnyr 2", "shortName": "Sleipnyr 2", "home": "chat", "agentName": "Agent", "features": { "replyPill": true, "phoneTarget": true, "recent": true } },
   "user": { "id": "me", "name": "Me" },
   "plugins": {
-    "theme": {},
+    "settings": {},
     "agent-hermes": {
       "agents": [
         { "id": "main", "name": "Agent", "url": "http://127.0.0.1:8642", "keyEnv": "HERMES_API_KEY", "titlePrefix": "sleipnyr2" }

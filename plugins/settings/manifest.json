@@ -1,0 +1,37 @@
+{
+  "id": "settings",
+  "name": "Settings",
+  "version": "2.0.0",
+  "contract": 1,
+  "doc": "Settings by hand: Theme (serves the active theme as CSS variables; a theme is a saved item of type theme, the most recently changed one is active), Features (the app's on/off switches) and Data (whether archived things may be deleted for good, off by default). Feature and data settings live in the kernel's settings item (/k/settings). Was the Theme plugin; /p/theme and /m/theme still work.",
+  "permissions": {
+    "read": [
+      "theme"
+    ],
+    "write": [
+      "theme"
+    ],
+    "network": []
+  },
+  "commands": [
+    {
+      "name": "default-theme",
+      "doc": "Make the default theme active again (saved as a new theme item)"
+    }
+  ],
+  "web": {
+    "entry": "web/settings.js",
+    "styles": [
+      "theme.css",
+      "web/settings.css"
+    ],
+    "restyleOn": [
+      "theme"
+    ]
+  },
+  "modality": {
+    "title": "Settings",
+    "doc": "Theme, feature switches and data, set by hand",
+    "icon": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"3\"/><path d=\"M12 2.8v2.6M12 18.6v2.6M2.8 12h2.6M18.6 12h2.6M5.5 5.5l1.8 1.8M16.7 16.7l1.8 1.8M5.5 18.5l1.8-1.8M16.7 7.3l1.8-1.8\"/></svg>"
+  }
+}

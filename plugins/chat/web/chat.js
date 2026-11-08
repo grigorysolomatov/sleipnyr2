@@ -23,6 +23,7 @@ const FULL = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 
 const STOP = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6.5" y="6.5" width="11" height="11" rx="1.5"/></svg>';
 // a turn still to come or running: a reply waiting or working, or a voice message being heard
 const busyIn = msgs => [...msgs.values()].some(m => m.data.role === "agent" ? ["queued", "working"].includes(m.data.status) : m.data.status === "transcribing");
+const TRASH = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4.5h6V7M6.5 7l1 12.5h9l1-12.5M10 11v5.5M14 11v5.5"/></svg>';
 const PLUS = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
 const FILE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>';
 const svg = s => { const t = document.createElement("template"); t.innerHTML = s; return t.content.firstChild; };
@@ -157,6 +158,8 @@ export async function mount(root, ctx) {
     histLive: new Map(), // reply id -> {progress} streamed for it, for the strip's line
     histFresh: new Set(), // reply ids the strip already highlighted
     stripHooks: new Set(), // extensions: fn(threadId) after the strip is pinned to a thread
+    archived: [], // hidden threads, newest first: the list's Archived section
+    archOpen: false, // Archived unfolded (kept over redraws)
     marks: new Map(), // thread id -> {reason, color}, while the agent highlights it (action chat_highlight)
     fxMarks: new Map(), // "id:part" -> {id, part, style, color, reason}, while the agent marks it (action chat_mark)
   };
@@ -232,7 +235,58 @@ export async function mount(root, ctx) {
         h("span", { class: "c-t" }, t.data.title || "New thread"),
         h("time", {}, when(t.updated))))));
     if (!st.threads.length) list.append(h("li", { class: "c-empty" }, "No threads yet."));
+    if (st.archived.length) list.append(drawArchived());
     for (const a of list.querySelectorAll("a[data-id]")) markTips(a, a.dataset.id);
+  }
+
+  // Archived (hidden) threads, folded under the list; a delete button each when
+  // Settings > Data allows deleting (the server checks that too).
+  function drawArchived() {
+    const del = ctx.settings?.().allowDelete === true;
+    const det = h("details", { "data-k-id": "archived", "data-k-kind": "section", "data-k-label": "Archived",
+      ontoggle: () => { st.archOpen = det.open; } },
+      h("summary", { "data-tip": `Hidden threads; ask ${who} to bring one back` }, `Archived (${st.archived.length})`),
+      h("ul", { class: "c-arch-rows", role: "list" }, ...st.archived.map(t => h("li", { class: "c-arch-row" },
+        h("a", { href: ctx.address(t.id), "data-id": t.id, "data-k-id": t.id, "data-k-kind": "thread",
+          onclick: e => { e.preventDefault(); openThread(t.id, true); } },
+          h("span", { class: "c-t" }, t.data.title || "New thread"), h("time", {}, when(t.updated))),
+        del ? h("button", { class: "c-btn c-ic c-del", type: "button", "data-tip": "Delete for good", "aria-label": "Delete for good",
+          onclick: e => { e.stopPropagation(); askDelete(t, e.currentTarget); } }, svg(TRASH)) : null))));
+    det.open = st.archOpen;
+    return h("li", { class: "c-arch" }, det);
+  }
+
+  // "Delete for good?" popover anchored at the trash button (Esc / outside tap = keep)
+  function askDelete(t, btn) {
+    closeAsk();
+    const box = side.getBoundingClientRect(), r = btn.getBoundingClientRect();
+    const no = h("button", { class: "c-ask-c", type: "button", onclick: closeAsk }, h("b", {}, "Keep"), h("small", {}, "Leave it in Archived"));
+    const yes = h("button", { class: "c-ask-c c-ask-yes", type: "button", onclick: async () => {
+      pop.classList.add("busy");
+      try { await deleteThread(t.id); closeAsk(); }
+      catch (e) { pop.classList.remove("busy"); q.textContent = `Not deleted: ${e.message}`; q.classList.add("err"); }
+    } }, h("b", {}, "Delete"), h("small", {}, "The thread, its messages and files only it uses"));
+    const q = h("p", { class: "c-ask-q" }, "Delete for good?");
+    const pop = h("div", { class: "c-ask", role: "dialog", "aria-label": "Delete for good?" }, q, yes, no);
+    side.append(pop);
+    const w = pop.offsetWidth, hgt = pop.offsetHeight;
+    const below = r.bottom - box.top + 4, above = r.top - box.top - hgt - 4;
+    pop.style.top = `${below + hgt > box.height && above >= 0 ? above : below}px`;
+    pop.style.left = `${Math.max(4, Math.min(r.right - box.left - w, box.width - w - 4))}px`;
+    st.askOff = () => { document.removeEventListener("keydown", esc, true); document.removeEventListener("pointerdown", out, true); };
+    const esc = e => { if (e.key === "Escape") { e.stopPropagation(); closeAsk(); } };
+    const out = e => { if (!pop.contains(e.target)) closeAsk(); };
+    document.addEventListener("keydown", esc, true);
+    setTimeout(() => document.addEventListener("pointerdown", out, true));
+    no.focus();
+  }
+  function closeAsk() { side.querySelector(".c-ask")?.remove(); st.askOff?.(); st.askOff = null; }
+
+  async function deleteThread(id) {
+    await ctx.api(`${API}/threads/${encodeURIComponent(id)}`, { method: "DELETE" });
+    st.archived = st.archived.filter(t => t.id !== id);
+    if (st.open === id) showList();
+    drawThreads();
   }
 
   async function loadAgents() {
@@ -259,7 +313,11 @@ export async function mount(root, ctx) {
     catch (e) { say(`Could not rename: ${e.message}`, true); }
   }
 
-  async function loadThreads() { st.threads = await ctx.api(`${API}/threads`); drawThreads(); }
+  async function loadThreads() {
+    const [shown, hidden] = await Promise.all([ctx.api(`${API}/threads`), ctx.api(`${API}/threads?hidden=1`).catch(() => [])]);
+    st.threads = shown; st.archived = hidden; drawThreads();
+  }
+  ctx.onSettings?.(() => drawThreads()); // deleting turned on/off in Settings: trash buttons follow
 
   async function newThread() {
     const t = await ctx.api(`${API}/threads`, { json: {} });
@@ -489,8 +547,12 @@ export async function mount(root, ctx) {
       else {
         const i = st.threads.findIndex(t => t.id === item.id);
         if (i >= 0) st.threads.splice(i, 1);
+        const j = st.archived.findIndex(t => t.id === item.id);
+        if (j >= 0) st.archived.splice(j, 1);
         if (!item.data.hidden) st.threads.unshift(item); // hidden = archived: out of the list
+        else st.archived.unshift(item);
         st.threads.sort((a, b) => b.updated - a.updated);
+        st.archived.sort((a, b) => b.updated - a.updated);
         drawThreads();
       }
       if (item.id === st.open) { title.textContent = item.data.title; mb.refresh();
@@ -548,6 +610,7 @@ export async function mount(root, ctx) {
     ["rename", "<thread id> <new title>", "rename it (counts as the user's own name)"],
     ["hide", "<thread id>", "archive it: out of the list, nothing deleted"],
     ["unhide", "<thread id>", "bring an archived thread back"],
+    ["delete", "<archived thread id>", "delete for good: only archived threads, only when Settings allows deleting"],
   ];
   const short = (s, n) => { const t = String(s || "").replace(/\s+/g, " ").trim(); return t.length > n ? t.slice(0, n - 1) + "…" : t; };
 
@@ -812,6 +875,7 @@ export async function mount(root, ctx) {
           await openThread(id, true);
         } else if (a.name === "rename") await ctx.api(`${API}/threads/${encodeURIComponent(id)}`, { method: "PATCH", json: { title: arg } });
         else if (a.name === "hide" || a.name === "unhide") await ctx.api(`${API}/threads/${encodeURIComponent(id)}`, { method: "PATCH", json: { hidden: a.name === "hide" } });
+        else if (a.name === "delete") await deleteThread(id);
         else throw new Error("unknown command");
         report.push(`ok ${a.name} ${id}`);
       } catch (e) { report.push(`failed ${a.name} ${id}: ${e.message}`); say(`List: could not ${a.name} ${id}: ${e.message}`, true); }
@@ -837,7 +901,9 @@ export async function mount(root, ctx) {
       + `\n${runs("list")} `
       + `Selected thread: ${st.open || "(none)"}. To show something on ${who}'s screen (blink the selection or a thread, `
       + `highlight threads, unfold this reply) call the sleipnyr2 tools (chat_blink, chat_highlight, chat_reply_open) instead of a line. `
-      + `Use only ids listed above. Never delete anything.]`;
+      + (ctx.settings?.().allowDelete
+        ? `Use only ids listed above. @delete only archived threads the user names for deletion.]`
+        : `Use only ids listed above. Deleting is OFF in Settings: never emit @delete; if asked to delete, say deletion is off in Settings > Data.]`);
   }
 
   const visible = el => !!el.getClientRects().length;

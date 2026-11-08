@@ -2,7 +2,7 @@
 // folder for file bytes. Implements the Items, Links and Files parts of the
 // contract. Nothing is ever deleted in v1.
 import { Database } from "bun:sqlite";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import type { FileData, Files, Item, ItemQuery, Items, Link, Links } from "./contract.ts";
 
@@ -32,6 +32,8 @@ export class Store {
   readonly filesDir: string;
   /** called after every create/update (the kernel publishes it as an event) */
   onChange: (item: Item) => void = () => {};
+  /** called after an item was deleted */
+  onRemove: (item: Item) => void = () => {};
 
   constructor(dataDir: string) {
     mkdirSync(dataDir, { recursive: true });
@@ -72,6 +74,25 @@ export class Store {
           .run(item.id, type, JSON.stringify(data), now, now, by);
         self.onChange(item as Item);
         return item;
+      },
+      remove(id: string) {
+        const cur = this.get<Record<string, unknown>>(id);
+        if (!cur) return false;
+        db.transaction(() => {
+          db.query("delete from items where id = ?").run(id);
+          db.query("delete from links where src = ? or dst = ?").run(id, id);
+        })();
+        // the bytes of a file go when no other file item holds the same content
+        const sha = cur.type === "file" ? String(cur.data.sha256 || "") : "";
+        if (/^[0-9a-f]{64}$/.test(sha) && !db.query("select 1 from items where type = 'file' and json_extract(data, '$.sha256') = ? limit 1").get(sha))
+          try { unlinkSync(join(self.filesDir, sha)); } catch { /* already gone */ }
+        self.onRemove(cur as Item);
+        return true;
+      },
+      usedBy(id: string) {
+        const rows = db.query<{ id: string }, [string, string, string]>(
+          "select src as id from links where dst = ? union select id from items where id != ? and instr(data, ?) > 0").all(id, id, `"${id}"`);
+        return [...new Set(rows.map(r => r.id))].filter(x => x !== id);
       },
       update<D>(id: string, patch: Record<string, unknown>) {
         const cur = this.get<Record<string, unknown>>(id);

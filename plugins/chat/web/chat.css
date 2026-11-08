@@ -18,7 +18,7 @@
 
 .c-shell { flex: 1; display: flex; min-height: 0; }
 /* one view at a time on every screen (as on the phone and in 1.0): the list, or a thread with a back arrow */
-.c-side { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.c-side { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; /* anchors the delete popover */ }
 .c-main { flex: 1; display: none; flex-direction: column; min-width: 0; position: relative; }
 .c-shell.thread-open .c-side { display: none; }
 .c-shell.thread-open .c-main { display: flex; }
@@ -51,6 +51,28 @@
 .c-threads a.unread .c-t { font-weight: 700; /* news nobody asked for (a notice's reply), until opened */ }
 .c-threads a.unread time { color: var(--accent-attention); }
 .c-threads time { color: var(--text-muted); font-size: .8em; }
+/* Archived: hidden threads folded under the list, a delete button each when allowed */
+.c-arch { border-top: var(--rule, 1px solid var(--text)); margin-top: .25rem; }
+.c-arch summary { padding: .6rem .75rem; color: var(--text-muted); font-size: .85em; cursor: pointer; }
+.c-arch-rows { list-style: none; margin: 0; padding: 0; }
+.c-arch-row { display: flex; align-items: center; }
+.c-arch-row a { flex: 1; min-width: 0; color: var(--text-muted); }
+.c-del { flex: none; margin-right: .25rem; }
+/* "Delete for good?": the shared popover look, anchored at the trash button */
+.c-ask {
+  position: absolute; z-index: 20; display: flex; flex-direction: column; min-width: 13rem;
+  max-width: calc(100% - 8px); padding: .25rem; background: var(--bg); border: 1px solid var(--text);
+  border-radius: var(--radius);
+}
+.c-ask.busy { opacity: .6; pointer-events: none; }
+.c-ask-q { margin: .3rem .7rem .2rem; color: var(--text-muted); font-size: .8em; }
+.c-ask-q.err { color: var(--text); }
+.c-ask-c {
+  display: flex; flex-direction: column; align-items: flex-start; gap: .1rem; padding: .5rem .7rem;
+  background: none; border: none; border-radius: calc(var(--radius) - 2px); color: var(--text); text-align: left; cursor: pointer; font: inherit;
+}
+.c-ask-c small { color: var(--text-muted); font-size: .8em; }
+.c-ask-c:hover, .c-ask-c:focus-visible { background: var(--surface); outline: none; }
 .c-empty { color: var(--text-muted); font-size: .8em; padding: .75rem; }
 /* The embedded chat: the list's conversation, pinned between the list and the
    bar. Collapsed: one line (last answer + tools); .open: a header over the

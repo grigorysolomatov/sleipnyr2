@@ -71,3 +71,18 @@
 .tm-num { min-width: 3.4rem; text-align: center; font-variant-numeric: tabular-nums; font-size: .85em; }
 .tm-col { display: flex; align-items: center; gap: .6rem; flex: none; }
 .tm-row > .tm-step { width: 8.45rem; justify-content: space-between; } /* as wide as swatch + gap + hex, so the resets line up */
+/* sections: Theme / Features / Data, one heading each */
+.tm-sec + .tm-sec { margin-top: 1.6rem; }
+.tm-sh { margin: 0 0 .1rem; font-size: 1em; font-weight: 600; }
+/* on/off switch: outlined track, the knob slides right and fills when on */
+.tm-tg {
+  position: relative; flex: none; width: 2.9rem; height: 1.6rem; padding: 0;
+  background: none; border: 1px solid var(--text-muted); border-radius: .8rem; cursor: pointer;
+}
+.tm-tg i {
+  position: absolute; top: .2rem; left: .2rem; width: 1.1rem; height: 1.1rem; border-radius: 50%;
+  border: 1px solid var(--text-muted); transition: transform .18s ease, background-color .18s ease;
+}
+.tm-tg[aria-checked="true"] { border-color: var(--text); }
+.tm-tg[aria-checked="true"] i { transform: translateX(1.3rem); background: var(--text); border-color: var(--text); }
+.tm-tg:hover { border-color: var(--text); }

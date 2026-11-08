@@ -117,6 +117,12 @@ export interface Items {
   create<D extends object>(type: string, data: D): Item<D>;
   /** shallow-merges patch into data; null values remove keys */
   update<D = Record<string, unknown>>(id: string, patch: Record<string, unknown>): Item<D>;
+  /** deletes the item and every link from or to it (a file item also loses its
+   *  bytes once no other file item holds them). Gated: plugins get an error
+   *  (status 403) unless the app setting data.allowDelete is on. */
+  remove(id: string): boolean;
+  /** ids of the other items that refer to this one: a link to it, or its id in their data */
+  usedBy(id: string): string[];
 }
 
 export interface Link {
@@ -229,7 +235,15 @@ export interface Kernel {
   /** shared app settings: agentName = how prompts and the UI name the agent (default "Agent") */
   app: { name: string; shortName: string; home: string; agentName: string };
   log(...args: unknown[]): void;
+  /** the app settings the user changes in Settings (kernel-owned, read-only here) */
+  settings(): AppSettings;
 }
+
+/** App settings changed by hand in Settings (one kernel-owned item of type "settings").
+ *  features: on/off per switch, over the config's app.features (default on).
+ *  allowDelete: deleting archived things for good (default off). */
+export interface AppSettings { allowDelete: boolean; features: Record<string, boolean> }
+export const SETTINGS_TYPE = "settings";
 
 export type Handler = (req: Request, params: Record<string, string>) => Response | Promise<Response>;
 

@@ -6,7 +6,7 @@ import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, 
 import { tmpdir } from "node:os";
 import { basename, extname, join, normalize, resolve } from "node:path";
 import {
-  CONTRACT_VERSION, ITEM_TOPIC,
+  CONTRACT_VERSION, ITEM_TOPIC, SETTINGS_TYPE, type AppSettings, type Items,
   type Events, type Handler, type Kernel, type Manifest, type ServerPlugin, type Services,
 } from "./contract.ts";
 import { Actions, type ActionsConfig } from "./actions.ts";
@@ -88,7 +88,7 @@ export interface Loaded { manifest: Manifest; dir: string; server?: ServerPlugin
 interface Route { method: string; parts: string[]; handler: Handler }
 
 /** Plugin renames: old config name -> plugin folder (the saved data is unchanged). */
-const RENAMED_PLUGINS: Record<string, string> = { sessions: "blackboards" };
+const RENAMED_PLUGINS: Record<string, string> = { sessions: "blackboards", theme: "settings" };
 
 function readManifest(dir: string, id: string): Manifest {
   const m = JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8")) as Manifest;
@@ -165,9 +165,44 @@ export async function createApp(config: Config) {
   const store = new Store(config.dataDir);
   const events = eventBus(), services = serviceRegistry();
   store.onChange = item => events.publish(ITEM_TOPIC, { item });
+  store.onRemove = item => events.publish(ITEM_TOPIC, { item, removed: true });
+
+  // ---- app settings: one kernel-owned item, changed by hand in Settings
+  const kItems = store.items("kernel");
+  const settingsItem = () => kItems.list<Partial<AppSettings>>({ type: SETTINGS_TYPE, order: "-updated", limit: 1 })[0] || null;
+  const settings = (): AppSettings => {
+    const d = settingsItem()?.data || {};
+    const features: Record<string, boolean> = {};
+    for (const [k, v] of Object.entries(config.app.features || {})) features[k] = v !== false;
+    for (const [k, v] of Object.entries(d.features || {})) if (typeof v === "boolean") features[k] = v;
+    return { allowDelete: d.allowDelete === true, features };
+  };
+  const setSettings = (b: { allowDelete?: unknown; features?: unknown }): AppSettings => {
+    const patch: Record<string, unknown> = {};
+    if (b.allowDelete !== undefined) {
+      if (typeof b.allowDelete !== "boolean") throw Object.assign(new Error("allowDelete must be true or false"), { status: 400 });
+      patch.allowDelete = b.allowDelete;
+    }
+    if (b.features !== undefined) {
+      if (!b.features || typeof b.features !== "object" || Array.isArray(b.features)) throw Object.assign(new Error("features must be {name: true|false}"), { status: 400 });
+      const f: Record<string, boolean | null> = { ...(settingsItem()?.data.features || {}) };
+      for (const [k, v] of Object.entries(b.features as Record<string, unknown>)) {
+        if (!/^[a-zA-Z][a-zA-Z0-9]{0,40}$/.test(k) || (typeof v !== "boolean" && v !== null)) throw Object.assign(new Error(`bad feature ${k}`), { status: 400 });
+        if (v === null) delete f[k]; else f[k] = v;
+      }
+      patch.features = f;
+    }
+    if (!Object.keys(patch).length) throw Object.assign(new Error("allowDelete or features required"), { status: 400 });
+    const cur = settingsItem();
+    if (cur) kItems.update(cur.id, patch); else kItems.create(SETTINGS_TYPE, { allowDelete: false, features: {}, ...patch });
+    return settings();
+  };
+  const offError = () => Object.assign(new Error("deletion is off (turn it on in Settings > Data)"), { status: 403 });
+  // deleting is a gated capability: refused unless Settings > Data allows it
+  const gated = (items: Items): Items => ({ ...items, remove: (id: string) => { if (!settings().allowDelete) throw offError(); return items.remove(id); } });
 
   const kernelFor = (id: string): Kernel => ({
-    contract: CONTRACT_VERSION, items: store.items(id), links: store.links(), files: store.files(id),
+    contract: CONTRACT_VERSION, items: gated(store.items(id)), links: store.links(), files: store.files(id), settings,
     events, services, config: config.plugins[id] || {}, user: config.user, privateDir: join(config.dataDir, "private", id), app: { ...config.app, agentName: config.app.agentName || "Agent" },
     log: (...a) => console.log(`[${id}]`, ...a),
   });
@@ -222,6 +257,20 @@ export async function createApp(config: Config) {
       if (want && Number(want) !== cur.updated) return json({ error: "changed", item: cur }, 409);
       return json(userItems.update(id, await req.json() as Record<string, unknown>));
     }
+    if (what === "items" && id && m === "DELETE") {
+      if (!settings().allowDelete) return json({ error: offError().message }, 403);
+      const cur = userItems.get(id);
+      if (!cur) return json({ error: "not found" }, 404);
+      if (cur.type === SETTINGS_TYPE) return json({ error: "settings are never deleted" }, 400);
+      if (cur.type === "file" && userItems.usedBy(id).length) return json({ error: "still used by other items" }, 409);
+      userItems.remove(id);
+      return json({ ok: true, id });
+    }
+    if (what === "settings" && !id && m === "GET") return json(settings());
+    if (what === "settings" && !id && m === "PATCH") {
+      try { return json(setSettings(await req.json() as Record<string, unknown>)); }
+      catch (e) { return json({ error: (e as Error).message }, (e as { status?: number }).status || 400); }
+    }
     if (what === "links" && m === "GET")
       return json(links.list({ src: url.searchParams.get("src") || undefined, rel: url.searchParams.get("rel") || undefined, dst: url.searchParams.get("dst") || undefined }));
     if (what === "links" && m === "POST") {
@@ -258,7 +307,7 @@ export async function createApp(config: Config) {
         return it ? json(it) : json({ error: "not found" }, 404);
       } catch (e) { return json({ error: (e as Error).message }, 400); }
     }
-    if (what === "plugins" && m === "GET") return json({ contract: CONTRACT_VERSION, build: BUILD, app: config.app, user: config.user, plugins: plugins.map(p => p.manifest) });
+    if (what === "plugins" && m === "GET") return json({ contract: CONTRACT_VERSION, build: BUILD, app: config.app, settings: settings(), user: config.user, plugins: plugins.map(p => p.manifest) });
     return json({ error: "not found" }, 404);
   };
 
@@ -267,7 +316,7 @@ export async function createApp(config: Config) {
     try {
       if (parts[0] === "k") return await kernelApi(req, parts.slice(1), url);
       if (parts[0] === "p" && parts[1]) {
-        const p = byId.get(parts[1]);
+        const p = byId.get(parts[1]) || byId.get(RENAMED_PLUGINS[parts[1]] || ""); // old addresses (/p/theme/theme.css in saved pages) keep working
         if (!p) return json({ error: "no such plugin" }, 404);
         if (parts[2] === "web" && req.method === "GET") return webFile(join(p.dir, "web"), parts.slice(3).join("/")) || json({ error: "not found" }, 404);
         const hit = matchRoute(p.routes, req.method, parts.slice(2));

@@ -1,7 +1,7 @@
 // Pure functions behind agent @lines and the theme editor.
 import { expect, test } from "bun:test";
 import { extractActions } from "../plugins/chat/server.ts";
-import { clean } from "../plugins/theme/server.ts";
+import { clean } from "../plugins/settings/server.ts";
 import { bad } from "../kernel/contract.ts";
 
 test("extractActions: plain lines, args and the short answer", () => {

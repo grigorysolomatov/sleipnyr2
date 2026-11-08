@@ -156,9 +156,28 @@ TypeScript web files are converted per request
 (no build step); the shell and the chat are plain JavaScript so they keep
 loading even if a conversion breaks.
 
-## Theme
+## Settings
 
-The `theme` plugin turns the active theme item (type `theme`, most recently
+The `settings` plugin (formerly `theme`; the old name, `/p/theme` and
+`/m/theme` still work) is the Settings modality, set by hand:
+
+- Theme: the look (below).
+- Features: the app's on/off switches. The config's `app.features` gives the
+  defaults; a change in Settings overrides it for every device.
+- Data: `allowDelete`, off by default. When on, archived threads get a delete
+  button and the agent may `@delete` an archived thread from the thread list.
+  The server refuses every delete while it is off (`items.remove`, `DELETE
+  /k/items/:id`, `DELETE /p/chat/threads/:id`). Deleting a thread removes its
+  messages and links, and each uploaded file that nothing else refers to.
+
+Features and Data are one kernel-owned item (type `settings`):
+`GET /k/settings` -> `{allowDelete, features}`, `PATCH /k/settings` with
+`{"allowDelete": true}` or `{"features": {"recent": false}}` (null = back to
+the config default). Pages follow a change live.
+
+### Theme
+
+The theme part turns the active theme item (type `theme`, most recently
 changed wins) into CSS variables. Plugins use only these tokens:
 
 `--bg --surface --text --text-muted --line --accent-here --accent-attention
@@ -170,7 +189,8 @@ agent's working state a spinner and words, errors a "!" and words).
 
 ## Plugins in v1
 
-- `theme` - CSS variables from the active theme item.
+- `settings` - the Settings modality: CSS variables from the active theme
+  item, feature switches and the deletion setting.
 - `agent-hermes` - service `agent` over a Hermes API server: one Hermes
   session per thread, background runs followed through their event stream,
   resumed after a kernel restart; images are sent as vision input, small

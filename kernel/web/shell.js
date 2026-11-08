@@ -71,6 +71,7 @@ const upload = file => api(`/k/files?name=${encodeURIComponent(file.name || "fil
 
 // one EventSource for all topics; reopened with the new topic list when it grows
 const handlers = new Map(), reconnects = new Set();
+const settingsHooks = new Set();
 let source = null, opened = false;
 function connect() {
   if (source) source.close();
@@ -143,7 +144,7 @@ function el(tag, attrs = {}, ...kids) {
 }
 
 const PICKER = "picker";
-const RENAMED = { sessions: "blackboards" }; // modality renames: old id -> new
+const RENAMED = { sessions: "blackboards", theme: "settings" }; // modality renames: old id -> new
 function createLevels(ctx, view, home, mods) {
   const boxes = new Map(), hooks = new Set(), last = new Map();
   let level = "", from = "";
@@ -265,13 +266,21 @@ async function boot() {
   const ctx = {
     app: { ...info.app, agentName: info.app.agentName || "Agent" }, user: info.user, plugins: info.plugins, api, upload, on,
     onReconnect, restyle,
-    // feature switches from the app config (app.features.<name> = false turns one off; default on)
-    feature: name => info.app.features?.[name] !== false,
+    // feature switches: Settings > Features (kernel settings item) over the app config; default on
+    feature: name => (info.settings?.features?.[name] ?? info.app.features?.[name]) !== false,
+    // the app settings changed by hand in Settings: {allowDelete, features}; kept fresh live
+    settings: () => info.settings || { allowDelete: false, features: {} },
     fileUrl: id => `/k/files/${encodeURIComponent(id)}`,
     address: id => `/i/${encodeURIComponent(id)}`,
     go: id => history.pushState({}, "", `/i/${encodeURIComponent(id)}`),
     route: () => decodeURIComponent((location.pathname.match(/^\/i\/(.+)$/) || [])[1] || ""),
   };
+  // a settings change on any page: fetch the merged values, tell the views ("settings" topic is local)
+  on("item", ({ item }) => {
+    if (item?.type !== "settings") return;
+    api("/k/settings").then(s => { info.settings = s; settingsHooks.forEach(f => { try { f(s); } catch (e) { console.error(e); } }); }).catch(() => {});
+  });
+  ctx.onSettings = fn => { settingsHooks.add(fn); return () => settingsHooks.delete(fn); };
   const restyleOn = new Map(info.plugins.flatMap(p => (p.web?.restyleOn || []).map(t => [t, p.id])));
   if (restyleOn.size) on("item", ({ item }) => { const p = restyleOn.get(item?.type); if (p) restyle(p); });
   ctx.bar = createBar(ctx, root);

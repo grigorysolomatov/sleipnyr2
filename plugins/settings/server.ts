@@ -5,7 +5,7 @@
 //   attention  asks for my attention                       default green
 //   agent      an agent is working (spinner, running)      default purple
 // Accents are rare and always come with a shape or label as well.
-// The Theme modality (web/theme.js) edits the active theme by hand through
+// The Settings modality's Theme section (web/settings.js) edits the active theme by hand through
 // GET/PATCH /tokens; every value is checked here, so only safe values land.
 import type { Kernel, ServerPlugin } from "../../kernel/contract.ts";
 

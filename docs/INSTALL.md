@@ -234,7 +234,7 @@ Copy `deploy/nixos/sleipnyr2.nix` into your configuration and import it:
       app = { name = "Sleipnyr 2"; shortName = "Sleipnyr 2"; home = "chat"; agentName = "Agent"; };
       user = { id = "me"; name = "Ada"; };
       plugins = {
-        theme = { };
+        settings = { };   # was theme (still accepted)
         agent-hermes.agents = [ { id = "main"; name = "Agent"; url = "http://127.0.0.1:8642"; keyEnv = "HERMES_API_KEY"; } ];
         transcribe-http = { };
         chat.agent = "main";

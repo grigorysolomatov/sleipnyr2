@@ -174,6 +174,30 @@ class Chat {
   }
 
   /** PATCH /threads/:id: {title?} renames (manual), {hidden?} archives or brings back. Never deletes. */
+  /** Deletes an archived thread for good: its messages and their links go too, and
+   *  each uploaded file once nothing else refers to it. Only when Settings > Data
+   *  allows deleting (items.remove refuses otherwise) and only archived threads. */
+  deleteThread(threadId: string) {
+    const t = this.k.items.get<Thread>(threadId);
+    if (!t || t.type !== "thread") throw new HttpError(404, "no such thread");
+    if (!this.k.settings().allowDelete) throw new HttpError(403, "deletion is off (turn it on in Settings > Data)");
+    if (t.data.view) throw new HttpError(400, "a view's history thread is never deleted");
+    if (!t.data.hidden) throw new HttpError(400, "only archived threads can be deleted: hide it first");
+    const msgs = this.messages(threadId);
+    const files = new Set<string>();
+    for (const m of msgs) for (const f of [...(m.data.files || []), ...(m.data.voice ? [m.data.voice] : [])]) files.add(f);
+    const gone = new Set([threadId, ...msgs.map(m => m.id)]);
+    for (const m of msgs) this.k.items.remove(m.id);
+    this.k.items.remove(threadId);
+    let kept = 0;
+    for (const f of files) {
+      if (this.k.items.get(f)?.type !== "file") continue;
+      if (this.k.items.usedBy(f).some(id => !gone.has(id))) { kept++; continue; }
+      this.k.items.remove(f);
+    }
+    return { ok: true, id: threadId, messages: msgs.length, files: files.size - kept, keptFiles: kept };
+  }
+
   change(threadId: string, b: { title?: unknown; hidden?: unknown; read?: unknown }) {
     const t = this.k.items.get<Thread>(threadId);
     if (!t || t.type !== "thread") throw new HttpError(404, "no such thread");
@@ -616,6 +640,9 @@ const plugin: ServerPlugin = {
       "PATCH /threads/:id": async (req, p) => {
         const b = await req.json().catch(() => ({})) as { title?: string; hidden?: boolean; read?: boolean };
         try { return Response.json(c().change(p.id, b)); } catch (e) { return bad(e); }
+      },
+      "DELETE /threads/:id": (_req, p) => {
+        try { return Response.json(c().deleteThread(p.id)); } catch (e) { return bad(e); }
       },
       "POST /threads/:id/title": async (req, p) => {
         const b = await req.json().catch(() => ({})) as { title?: string };

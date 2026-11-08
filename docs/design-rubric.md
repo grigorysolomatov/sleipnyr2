@@ -16,7 +16,7 @@ deploy/preview.sh, not the live app: live turns change the page.
 
 1. No horizontal overflow (Columns' strip and the board plane are exempt).
 2. Every visible button has a data-tip (on itself or an ancestor).
-3. Colours are theme tokens (plugins/theme), or a token darkened or
+3. Colours are theme tokens (plugins/settings), or a token darkened or
    tinted toward black.
 4. Full-width single separator lines are white 1px. Message dividers are
    grey by decision, and so are boxes (panels, cards).

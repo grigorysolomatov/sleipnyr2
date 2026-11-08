@@ -1,14 +1,19 @@
-// Theme: a composed modality for setting the look by hand, no agent needed.
+// Settings: a composed modality for the app's settings by hand, no agent needed.
+// Sections: Theme (below), Features (the app's on/off switches) and Data
+// (whether archived things may be deleted for good). Features and Data are the
+// kernel's settings item (GET/PATCH /k/settings); every open page follows a
+// change live. Theme:
 // One row per token (what it means, a swatch that opens the colour picker,
 // the hex value, back-to-default); sizes as steppers. A change shows at once
 // everywhere on this page (CSS variables on <html>), is saved to the active
-// theme item shortly after (PATCH /p/theme/tokens, checked on the server),
+// theme item shortly after (PATCH /p/settings/tokens, checked on the server),
 // and other open pages restyle through the kernel's "styles" event.
-// The embedded chat underneath talks to the view: @set / @reset lines.
+// The embedded chat underneath talks to the view: @set / @reset / @feature /
+// @allow-delete lines.
 import { ONE_SENTENCE, runs } from "/web/hcp.js";
 import { backButton } from "/web/head.js";
-const ME = "theme";
-const API = "/p/theme";
+const ME = "settings";
+const API = "/p/settings";
 const RESET = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4.5h4.5"/></svg>';
 
 // what each token means, in plain words; the order is the order on screen
@@ -33,6 +38,12 @@ const GROUPS = [
     ["font-size", "Text size", "Base text size, in pixels", 12, 24],
   ]],
 ];
+// the app's feature switches (others the config names show with their id)
+const FEATURES = [
+  ["replyPill", "Reply pill", "A pill names the view where the agent replied, tap to go there"],
+  ["phoneTarget", "Bar target on the phone", "The bar shows which conversation it sends to, on small screens too"],
+  ["recent", "Recent conversations", "The modality list shows the latest conversations at the top"],
+];
 const ROWS = GROUPS.flatMap(([, rows]) => rows);
 const SIZES = new Set(["radius", "font-size"]);
 const HEX = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
@@ -52,14 +63,14 @@ const svg = s => { const t = document.createElement("template"); t.innerHTML = s
 
 export function mount(box, ctx) {
   const AG = ctx.app.agentName;
-  const st = { tokens: {}, defaults: {}, pending: {}, timer: 0, saving: null, fields: new Map() };
+  const st = { tokens: {}, defaults: {}, pending: {}, timer: 0, saving: null, fields: new Map(), app: ctx.settings?.() || { allowDelete: false, features: {} } };
   const rootStyle = document.documentElement.style;
 
   const back = backButton({ cls: "tm-back", tip: "All modalities", onclick: () => ctx.levels.up() });
   const resetAll = h("button", { class: "tm-ic tm-all", type: "button", "data-tip": "Reset everything to the default look", "aria-label": "Reset all", onclick: () => resetEverything() }, svg(RESET));
   const note = h("p", { class: "tm-note", "aria-live": "polite", hidden: true });
   const body = h("div", { class: "tm-body" });
-  box.append(h("header", { class: "tm-bar" }, back, h("b", { class: "tm-title" }, "Theme"), resetAll), body, note);
+  box.append(h("header", { class: "tm-bar" }, back, h("b", { class: "tm-title" }, "Settings"), resetAll), body, note);
   const say = (t, err = false) => { note.hidden = !t; note.textContent = t || ""; note.classList.toggle("err", err); };
 
   // ------------------------------------------------------------ preview
@@ -106,7 +117,54 @@ export function mount(box, ctx) {
   }
   const list = h("div", { class: "tm-groups" }, GROUPS.map(([title, rows]) =>
     h("section", { class: "tm-group" }, h("p", { class: "tm-gh" }, title), h("ul", { class: "tm-rows", role: "list" }, rows.map(row)))));
-  body.append(preview, list);
+  // ------------------------------------------------------------ features + data
+  const toggles = new Map(); // key -> {btn, get}
+  function toggle(key, name, doc, get, set) {
+    const btn = h("button", { class: "tm-tg", type: "button", role: "switch", "aria-label": name,
+      onclick: () => set(!get()) }, h("i", { "aria-hidden": "true" }));
+    toggles.set(key, { btn, name, get });
+    return h("li", { class: "tm-row", "data-k-id": key, "data-k-kind": "setting", "data-k-label": name },
+      h("span", { class: "tm-t" }, h("b", {}, name), h("small", {}, doc)), btn);
+  }
+  const featureNames = () => {
+    const known = new Set(FEATURES.map(([k]) => k));
+    return [...FEATURES, ...Object.keys(st.app.features || {}).filter(k => !known.has(k)).map(k => [k, k, "A feature switch from the app config"])];
+  };
+  const featRows = h("ul", { class: "tm-rows", role: "list" });
+  const drawFeatureRows = () => featRows.replaceChildren(...featureNames().map(([k, name, doc]) =>
+    toggle(`feature.${k}`, name, doc, () => st.app.features?.[k] !== false, on => saveApp({ features: { [k]: on } }))));
+  drawFeatureRows();
+  const dataRows = h("ul", { class: "tm-rows", role: "list" },
+    toggle("data.allowDelete", "Allow deleting", "Archived threads get a delete button; deleting is for good",
+      () => st.app.allowDelete === true, on => saveApp({ allowDelete: on })));
+  const section = (title, ...kids) => h("section", { class: "tm-sec", "data-k-id": `section-${title.toLowerCase()}`, "data-k-kind": "section" },
+    h("h2", { class: "tm-sh" }, title), ...kids);
+  body.append(
+    section("Theme", preview, list),
+    section("Features", h("section", { class: "tm-group" }, featRows)),
+    section("Data", h("section", { class: "tm-group" }, dataRows)));
+
+  function drawApp() {
+    for (const [, t] of toggles) {
+      const on = t.get();
+      t.btn.setAttribute("aria-checked", String(on));
+      t.btn.dataset.tip = `${t.name}: ${on ? "on, tap to turn off" : "off, tap to turn on"}`;
+    }
+  }
+  async function saveApp(patch) {
+    const before = st.app;
+    st.app = { ...st.app, ...(patch.allowDelete !== undefined ? { allowDelete: patch.allowDelete } : {}),
+      features: { ...st.app.features, ...(patch.features || {}) } };
+    drawApp(); say("");
+    try { st.app = await ctx.api("/k/settings", { method: "PATCH", json: patch }); drawApp(); }
+    catch (e) { st.app = before; drawApp(); say(`Not saved: ${e.message}`, true); }
+  }
+  async function loadApp() {
+    try { st.app = await ctx.api("/k/settings"); drawFeatureRows(); drawApp(); }
+    catch (e) { say(`Could not load the settings: ${e.message}`, true); }
+  }
+  ctx.onSettings?.(s => { st.app = s; drawFeatureRows(); drawApp(); });
+  drawApp();
 
   function drawAll() {
     for (const [k, f] of st.fields) {
@@ -172,14 +230,22 @@ export function mount(box, ctx) {
   ctx.on("item", ({ item }) => { if (item?.type === "theme" && !Object.keys(st.pending).length && !st.saving) load(); });
 
   // ------------------------------------------------------------ agent
-  const describe = () => `[Sent from the Sleipnyr Theme modality: hand settings for the app's look. Current values (token | name | value | default):\n`
+  const describe = () => `[Sent from the Sleipnyr Settings modality: hand settings for the app. Theme values (token | name | value | default):\n`
     + ROWS.map(([k, name]) => `- ${k} | ${name} | ${st.tokens[k]} | ${st.defaults[k]}`).join("\n")
-    + `\nThis chat is the Theme view's own history; the view acts on your reply. ${ONE_SENTENCE}, `
+    + `\nFeatures (id | name | on/off):\n` + featureNames().map(([k, name]) => `- ${k} | ${name} | ${st.app.features?.[k] !== false ? "on" : "off"}`).join("\n")
+    + `\nData: deleting archived things for good is ${st.app.allowDelete ? "ON" : "OFF"}.`
+    + `\nThis chat is the Settings view's own history; the view acts on your reply. ${ONE_SENTENCE}, `
     + `then one line per action, exactly:\n@set <token> <value>   (colours as #rrggbb; radius 0-24, font-size 12-24 as <n>px)\n`
-    + `@reset <token>   (back to its default)\n@reset all   (the whole default look)\n`
-    + `${runs("view")} Use only the tokens listed. Never delete anything.]`;
+    + `@reset <token>   (back to its default)\n@reset all   (the whole default look)\n@feature <id> on|off\n@allow-delete on|off   (only when the user asks for it in so many words)\n`
+    + `${runs("view")} Use only the tokens and feature ids listed. Never delete anything.]`;
   const run = async (name, args) => {
     const [k, v] = String(args).trim().split(/\s+/);
+    const onOff = x => { const w = String(x || "").toLowerCase(); if (w === "on" || w === "off") return w === "on"; throw new Error(`say on or off, not ${x}`); };
+    if (name === "feature") {
+      if (!featureNames().some(([f]) => f === k)) throw new Error(`no feature ${k}`);
+      await saveApp({ features: { [k]: onOff(v) } }); return `feature ${k} ${v}`;
+    }
+    if (name === "allow-delete") { await saveApp({ allowDelete: onOff(k) }); return `allow-delete ${k}`; }
     if (name === "reset" && k === "all") { await resetEverything(); return "reset all"; }
     if (!st.fields.has(k)) throw new Error(`no token ${k}`);
     if (name === "reset") { change(k, null); await save(); return `reset ${k}`; }
@@ -190,15 +256,15 @@ export function mount(box, ctx) {
   };
 
   let chat = null;
-  ctx.bar.offer({ id: ME, label: () => "Theme", shown: () => !!box.getClientRects().length,
-    placeholder: () => "Ask for colours",
+  ctx.bar.offer({ id: ME, label: () => "Settings", shown: () => !!box.getClientRects().length,
+    placeholder: () => "Ask for a setting",
     busy: () => !!chat?.busy?.(),
     send: b => { if (!chat) throw new Error("no conversation here"); return chat.send(b); } });
   ctx.levels.onChange(level => {
     if (level !== ME) return;
-    chat = ctx.embed(ME, box, { title: "Theme conversation", from: "theme", describe, run });
+    chat = ctx.embed(ME, box, { title: "Settings conversation", from: "settings", describe, run });
     ctx.bar.focus(ME);
-    load();
+    load(); loadApp();
   });
-  load();
+  load(); loadApp();
 }
