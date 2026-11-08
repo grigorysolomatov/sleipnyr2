@@ -62,6 +62,30 @@ function blip() {
   } catch { /* no audio: visual feedback only */ }
 }
 
+// Durable voice outbox: a recording is written to IndexedDB before anything
+// is uploaded and removed only once the target accepted the message, so a
+// reload (the update pill), a crash or a dropped connection cannot lose it.
+const outbox = (() => {
+  const open = () => new Promise((ok, no) => {
+    const r = indexedDB.open("sleipnyr2-outbox", 1);
+    r.onupgradeneeded = () => r.result.createObjectStore("voice", { keyPath: "id" });
+    r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error);
+  });
+  const run = async (mode, fn) => {
+    const db = await open();
+    return new Promise((ok, no) => {
+      const tx = db.transaction("voice", mode), q = fn(tx.objectStore("voice"));
+      tx.oncomplete = () => { db.close(); ok(q?.result); }; tx.onerror = tx.onabort = () => { db.close(); no(tx.error); };
+    });
+  };
+  const safe = async (fn, fallback) => { try { return await fn(); } catch (e) { console.warn("outbox:", e); return fallback; } };
+  return {
+    put: rec => safe(() => run("readwrite", s => s.put(rec))),
+    del: id => safe(() => run("readwrite", s => s.delete(id))),
+    all: () => safe(() => run("readonly", s => s.getAll()), []),
+  };
+})();
+
 export function createBar(ctx, app) {
   const targets = new Map(); // id -> target, in offer order
   let current = "";
@@ -278,24 +302,55 @@ export function createBar(ctx, app) {
     if (!file) return keep && say("Nothing was recorded.", true);
     sentFx(); form.classList.add("sending");
     const files = b.pending; // attachments waiting in the tray go with the voice message
+    const rec0 = { id: `v${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, blob: file, name: file.name, type: file.type,
+      text: ta.value.trim(), href: location.pathname + location.hash, target: current, voice: null, files: [], mode: "" };
+    await outbox.put(rec0); // on disk first: a reload from here on loses nothing
     try {
       const voice = await ctx.upload(file);
+      rec0.voice = voice.id; await outbox.put(rec0); // a retry skips the upload
       await Promise.all(files.map(p => p.upload));
       const failed = files.find(p => p.error);
       if (failed) throw new Error(`upload of ${failed.file.name || "a file"} failed: ${failed.error}`);
+      rec0.files = files.map(p => p.id); await outbox.put(rec0);
       const mode = await whenMode();
-      await deliver({ text: ta.value.trim(), voice: voice.id, files: files.map(p => p.id), ...(mode ? { mode } : {}) });
+      rec0.mode = mode || ""; await outbox.put(rec0);
+      await deliver({ text: rec0.text, voice: voice.id, files: rec0.files, ...(mode ? { mode } : {}) });
+      await outbox.del(rec0.id);
       form.classList.remove("sending");
       ta.value = ""; grow();
       files.forEach(p => p.url && URL.revokeObjectURL(p.url));
       b.pending = b.pending.filter(p => !files.includes(p)); drawTray();
     } catch (e) {
       form.classList.remove("sending");
-      say(`Voice message not sent: ${e.message}`, true);
+      say(`Voice message not sent: ${e.message} (kept; it retries on reload)`, true);
       // keep the clip reachable: offer it as a download
       note.append(" ", h("a", { href: URL.createObjectURL(file), download: file.name }, "save recording"));
     }
   }
+
+  // Recordings left in the outbox (the page went away mid-send): send them
+  // once the same view is on screen again. Gives up for this load after
+  // 2 minutes; the clip stays stored and is tried again on the next load.
+  async function resumeOutbox() {
+    const recs = (await outbox.all()).sort((x, y) => x.id < y.id ? -1 : 1);
+    for (const r of recs) {
+      const t0 = Date.now();
+      while (!(aim() && (r.href === location.pathname + location.hash || Date.now() - t0 > 15000))) {
+        if (Date.now() - t0 > 120000) return;
+        await new Promise(ok => setTimeout(ok, 500));
+      }
+      try {
+        say("Sending a voice message that was interrupted…");
+        const voice = r.voice ? { id: r.voice }
+          : await ctx.upload(new File([r.blob], r.name, { type: r.type }));
+        if (!r.voice) { r.voice = voice.id; await outbox.put(r); }
+        await deliver({ text: r.text, voice: voice.id, files: r.files || [], ...(r.mode ? { mode: r.mode } : {}) });
+        await outbox.del(r.id); say("");
+      } catch (e) { say(`Voice message still not sent: ${e.message}`, true); return; }
+    }
+  }
+  setTimeout(resumeOutbox, 0);
+  addEventListener("online", () => resumeOutbox());
 
   addEventListener("keydown", e => {
     if (!e.altKey || e.ctrlKey || e.metaKey) return;
