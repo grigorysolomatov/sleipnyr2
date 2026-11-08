@@ -328,12 +328,61 @@ export function mount(box, ctx) {
     for (const [id, el] of st.zels) if (!ids.has(id)) { el.remove(); st.zels.delete(id); }
     for (const z of zones()) {
       let el = st.zels.get(z.id);
-      if (!el) { el = h("div", { class: "ss-zone" }, h("span", { class: "ss-zname" })); st.zels.set(z.id, el); }
-      el.firstChild.textContent = z.title;
+      if (!el) { el = zoneEl(z.id); st.zels.set(z.id, el); }
+      el.querySelector(".ss-ztitle").textContent = z.title;
       const s2 = el.style;
       s2.left = z.x + "px"; s2.top = z.y + "px"; s2.width = z.w + "px"; s2.height = z.h + "px";
       if (el.parentNode !== plane) plane.prepend(el);
     }
+  }
+  // by hand: drag the label (windows inside follow), tap it to rename, x removes the frame
+  // (windows stay), the corner grip resizes. Same data as @zone, so both stay in sync.
+  const zfind = id => zones().find(q => q.id === id);
+  function zoneEl(id) {
+    const ttl = h("span", { class: "ss-ztitle" });
+    const x = icon(CLOSE, "Remove this section (its windows stay)", () => { const z = zfind(id); if (z) { dropZone(z.id); } }, "ss-zx");
+    const label = h("div", { class: "ss-zname", "data-tip": "Drag to move; tap to rename" }, ttl, x);
+    const grip = h("span", { class: "ss-grip ss-zgrip", "data-tip": "Drag to resize" }, svg(GRIP));
+    const el = h("div", { class: "ss-zone", "data-k-id": id, "data-k-kind": "section" }, label, grip);
+    let members = [], sx = 0, sy = 0, dx = 0, dy = 0;
+    const mv = (ddx, ddy) => {
+      const z = zfind(id); if (!z) return; dx = ddx; dy = ddy;
+      el.style.left = z.x + dx + "px"; el.style.top = z.y + dy + "px";
+      for (const w of members) { w.x = w.ox + dx; w.y = w.oy + dy; place(w); }
+    };
+    mv.start = () => { const z = zfind(id); if (!z) return; sx = z.x; sy = z.y; dx = dy = 0;
+      members = wins().filter(w => zoneOf(w) === z); for (const w of members) { w.ox = w.x; w.oy = w.y; } el.classList.add("drag"); };
+    track(label, mv, cancelled => {
+      el.classList.remove("drag");
+      const z = zfind(id); if (!z) return;
+      if (Math.hypot(dx, dy) * viewOf().z < 8) {
+        for (const w of members) { w.x = w.ox; w.y = w.oy; place(w); delete w.ox; delete w.oy; }
+        el.style.left = z.x + "px"; el.style.top = z.y + "px";
+        if (!cancelled) { const t = prompt("Section name", z.title); if (t?.trim()) { z.title = t.trim(); drawZones(); save(); } }
+        return;
+      }
+      const nx = snap(sx + dx), ny = snap(sy + dy), mx = nx - sx, my = ny - sy;
+      for (const w of members) { const from = { x: w.ox + dx, y: w.oy + dy, w: w.w, h: w.h }; w.x = w.ox + mx; w.y = w.oy + my; delete w.ox; delete w.oy; glideWin(w, from); }
+      z.x = nx; z.y = ny; el.style.left = nx + "px"; el.style.top = ny + "px"; save();
+    });
+    let sw = 0, sh = 0;
+    const rs = (ddx, ddy) => { const z = zfind(id); if (!z) return; el.classList.add("drag");
+      el.style.width = Math.max(240, sw + ddx) + "px"; el.style.height = Math.max(144, sh + ddy) + "px"; };
+    rs.start = () => { const z = zfind(id); if (z) { sw = z.w; sh = z.h; } };
+    track(grip, rs, () => {
+      el.classList.remove("drag"); const z = zfind(id); if (!z) return;
+      z.w = Math.max(240, snap(parseFloat(el.style.width))); z.h = Math.max(144, snap(parseFloat(el.style.height)));
+      el.style.width = z.w + "px"; el.style.height = z.h + "px"; save();
+    });
+    return el;
+  }
+  function addZone() {
+    if (!st.open) throw new Error(`no ${WORD} is open`);
+    const all = zones(); let n = all.length + 1, t;
+    while (all.some(q => q.title.toLowerCase() === (t = `Section ${n}`).toLowerCase())) n++;
+    const r = board.getBoundingClientRect(), v = viewOf();
+    const cx = ((r.width || innerWidth) / 2 - v.x) / v.z, cy = ((r.height || innerHeight) / 2 - v.y) / v.z;
+    return setZone(t, cx - 480, cy - 360, 960, 720);
   }
   // @zone <title> <x> <y> <w> <h>: makes one or moves/resizes the one with that title (it glides)
   function setZone(title, x, y, ww, hh) {
@@ -801,6 +850,7 @@ export function mount(box, ctx) {
       item("Thread list", "All threads, with their own conversation", done(() => addWin("threads"))),
       item("Task Tinder", `Swipe ${AG}'s task suggestions`, done(() => addWin("tinder"))),
       item("Projects", "The project list and dashboards", done(() => addWin("projects"))),
+      item("Section", "A labelled frame to group windows; drag its label, tap to rename", done(() => addZone())),
       item("Note", "A short Markdown note; tap its pen to write", done(() => { const w = addWin("note", "", "Note"); toggleEdit(w.id); })),
       item("File or PDF…", "Upload a file; it opens in the browser's own viewer", done(() => fileIn.click())),
       item("Web page…", "Any http(s) address", done(() => { const u = prompt("Web address (https://…)", "https://"); if (u && u.trim() !== "https://") addWin("url", u.trim()); })));

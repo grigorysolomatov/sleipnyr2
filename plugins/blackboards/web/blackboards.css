@@ -86,7 +86,13 @@
   position: absolute; z-index: 0; border: var(--ss-zone-line); border-radius: calc(var(--radius) * 2); background: var(--ss-zone-fill); cursor: grab;
   transition: left var(--ss-glide) var(--ss-ease), top var(--ss-glide) var(--ss-ease), width var(--ss-glide) var(--ss-ease), height var(--ss-glide) var(--ss-ease);
 }
-.ss-zname { position: absolute; left: 1.25rem; top: .9rem; font-size: var(--ss-zone-size); color: var(--text-muted); white-space: nowrap; pointer-events: none; }
+.ss-zname { position: absolute; left: .75rem; top: .5rem; display: flex; align-items: center; gap: .3rem; padding: .15rem .5rem; border-radius: var(--radius);
+  font-size: var(--ss-zone-size); color: var(--text-muted); white-space: nowrap; cursor: grab; user-select: none; touch-action: none; }
+.ss-zname:hover { color: var(--text); }
+.ss-zx { color: var(--text-muted); }
+.ss-zx svg { width: 1.2rem; height: 1.2rem; }
+.ss-zone.drag { transition: none; }
+.ss-zgrip { cursor: nwse-resize; }
 
 /* a window: title bar (drag), its view, a corner grip (resize) */
 .ss-win {
