@@ -109,6 +109,15 @@ function fadeNew(box, f) {
 }
 
 export async function mount(root, ctx) {
+  // lost conversations (each part behind an app.features switch, default on)
+  const feat = name => (ctx.feature ? ctx.feature(name) : true);
+  const lsGet = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
+  const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private mode */ } };
+  const PILLS_KEY = "sleipnyr2.pills", PLACES_KEY = "sleipnyr2.places", LAST_KEY = "sleipnyr2.lastConversation";
+  const FIN = ["done", "error", "stopped", "cancelled"];
+  const pills = new Map([].concat(lsGet(PILLS_KEY, [])).filter(p => p?.id && Date.now() - p.at < 864e5).slice(-10).map(p => [p.id, p]));
+  const places = lsGet(PLACES_KEY, {}) || {}; // view -> {level, sub, name}: where its embedded chat was last shown
+  let pill = null;
   const who = ctx.user?.name || "the user", agentName = ctx.app?.agentName || "the agent";
   // A message file: audio plays inline (like a voice message), images show,
   // anything else is a file chip (symbol, name, size) that opens the file.
@@ -259,7 +268,7 @@ export async function mount(root, ctx) {
 
   async function openThread(id, push) {
     st.animate = false; setTimeout(() => { st.animate = true; }, 600);
-    st.open = id; st.live.clear(); st.fades.clear(); st.steps.clear();
+    st.open = id; st.live.clear(); st.fades.clear(); st.steps.clear(); setLast(id);
     if (push) ctx.go(id);
     const t = threadOf(id);
     title.textContent = t ? t.data.title : "";
@@ -486,6 +495,7 @@ export async function mount(root, ctx) {
         if (item.data.unread && shell.classList.contains("thread-open") && document.visibilityState === "visible") markRead(item.id); }
       if (st.hist?.id === item.id && !item.data.view) { st.hist = item; setStripName(); }
     } else if (item.type === "message") {
+      if (pills.has(item.id)) pillUpdate(item);
       if (st.hist && item.data.thread === st.hist.id) try { histMessage(item); } catch (e) { console.error(e); }
       if (item.data.thread !== st.open) return;
       st.msgs.set(item.id, item);
@@ -521,10 +531,12 @@ export async function mount(root, ctx) {
 
   async function post(id, body) {
     const out = await ctx.api(`${API}/threads/${encodeURIComponent(id)}/messages`, { json: body });
-    if (st.open !== id) return;
+    pillAdd(out.reply?.id, "", id);
+    if (st.open !== id) return out;
     // the server has it now: a drawing glitch must never look like "not sent" (that invites resends)
     for (const m of [out.user, out.reply]) { st.msgs.set(m.id, m); try { redrawMessage(m.id); } catch (e) { console.error(e); } }
     log.scrollTo({ top: logEnd(), behavior: "smooth" });
+    return out;
   }
 
   // ------------------------------------------------------------ the list acts on itself
@@ -549,6 +561,11 @@ export async function mount(root, ctx) {
     const mine = ++pinning;
     st.hist = t;
     if (t.data.view) st.viewThread = t; else st.altView = emb.view;
+    const pl = t.data.view && places[t.data.view], was = t.data.place || {};
+    if (pl && (was.level !== pl.level || was.sub !== pl.sub || was.name !== pl.name)) {
+      t.data.place = { ...pl };
+      ctx.api(`/k/items/${encodeURIComponent(t.id)}`, { method: "PATCH", json: { place: t.data.place } }).catch(e => console.error(e));
+    }
     setStripName();
     const msgs = await ctx.api(`${API}/threads/${encodeURIComponent(t.id)}/messages`);
     if (mine !== pinning) return;
@@ -814,10 +831,10 @@ export async function mount(root, ctx) {
   const visible = el => !!el.getClientRects().length;
   mb.offer({ id: "thread", label: () => threadOf(st.open)?.data.title || "This thread",
     shown: () => !!st.open && visible(main), busy: () => !!st.open && busyIn(st.msgs),
-    send: async body => { const id = await ensureThread(); await post(id, body); } });
+    send: async body => { const id = await ensureThread(); return post(id, body); } });
   mb.offer({ id: "threads", label: () => "Thread list", shown: () => visible(side),
     placeholder: () => "Ask the list: open, rename, hide threads", busy: () => !!st.hist && busyIn(st.histMsgs),
-    send: async body => { if (emb.view !== "threads") embedHome(); await sendView("threads", body); } });
+    send: async body => { if (emb.view !== "threads") embedHome(); return sendView("threads", body); } });
 
   // ------------------------------------------------------------ the embedded chat elsewhere
   // Other levels (the modality picker, other modalities) borrow the embedded
@@ -828,6 +845,7 @@ export async function mount(root, ctx) {
     from: "thread list", describe: () => describeList(), run: null };
   let emb = HOME;
   function embed(view, box, opts = {}) {
+    notePlace(view, opts);
     if (!/^[a-z][a-z0-9-]{0,30}$/.test(view)) throw new Error("bad view name");
     emb = { ...opts, view };
     closeMenu();
@@ -840,13 +858,16 @@ export async function mount(root, ctx) {
   async function sendView(view, body) {
     const e = emb;
     if (e.view !== view) throw new Error("that conversation is not on screen");
-    const context = e.describe ? await e.describe() : "";
+    // what the view shows, plus any note the sender adds (hands-free talk: "answer briefly, spoken")
+    const context = [e.describe ? await e.describe() : "", body.context || ""].filter(Boolean).join("\n\n");
     if (!(isAlt() && st.altView === view) && st.hist?.data.view !== view) await pinHist(await ctx.api(`${API}/views/${encodeURIComponent(view)}/thread`, { method: "POST", json: {} }));
     const out = await ctx.api(`${API}/threads/${encodeURIComponent(st.hist.id)}/messages`, { json: { ...body, context, from: e.from || view } });
     // the server has it: a drawing glitch must not look like "not sent"
     mine.add(out.reply.id); if (e.run) runFor.set(out.reply.id, e.run);
     remember(out.reply.id, view, scopeOf(e));
+    pillAdd(out.reply.id, view, st.hist?.id);
     try { st.histLast = out; for (const m of [out.user, out.reply]) st.histMsgs.set(m.id, m); drawStrip(); } catch (err) { console.error(err); }
+    return out;
   }
   ctx.levels?.onChange(level => { if (level === "chat") { embedHome(); mb.focus(st.open && visible(main) ? "thread" : "threads"); } });
   mb.focus(st.open ? "thread" : "threads");
@@ -1059,6 +1080,116 @@ export async function mount(root, ctx) {
     openStrip(true);
     return "unfolded the reply";
   });
+
+  // ------------------------------------------------------------ lost conversations
+  // A: a pill above the bar while a reply waits in a conversation that is not
+  // on screen; tap goes there with its chat open, swipe dismisses.
+  // C: ctx.conversations feeds the picker's Recent list.
+  const pillT = h("span", { class: "c-pill-t" }), pillN = h("span", { class: "c-pill-n" });
+  const pillS = h("span", { class: "c-pill-spin", "aria-hidden": "true" });
+  let swiped = false, x0 = null;
+  pill = h("button", { type: "button", class: "c-pill", hidden: true, "data-k-id": "reply-pill", "data-k-kind": "pill",
+    onclick: () => { if (swiped) { swiped = false; return; } const p = pillTop(); if (p) goConversation(p); },
+    onpointerdown: e => { x0 = e.clientX; try { pill.setPointerCapture(e.pointerId); } catch { /* old browsers */ } },
+    onpointermove: e => { if (x0 !== null) pill.style.translate = `${e.clientX - x0}px 0`; },
+    onpointerup: e => {
+      const dx = x0 === null ? 0 : e.clientX - x0; x0 = null; pill.style.translate = "";
+      if (Math.abs(dx) > 50) { swiped = true; const p = pillTop(); if (p) pills.delete(p.id); drawPill(); }
+    },
+    onpointercancel: () => { x0 = null; pill.style.translate = ""; } }, pillS, pillT, pillN);
+  mb.el.append(pill);
+
+  function placeOf(view) {
+    if (places[view]) return places[view];
+    const [first, ...rest] = String(view).split("-");
+    const level = first === "threads" ? "chat" : first === "sessions" ? "blackboards" : first;
+    const p = (ctx.plugins || []).find(x => x.id === level);
+    return { level: p ? level : "chat", sub: p ? rest.join("-") : "", name: p?.modality?.title || view };
+  }
+  function notePlace(view, opts) {
+    if (!view) return;
+    const name = String(opts?.title || "").replace(/\s*conversation$/i, "").trim() || placeOf(view).name;
+    places[view] = { level: ctx.levels?.current() || "chat", sub: ctx.levels?.sub?.() || "", name };
+    lsSet(PLACES_KEY, places);
+    if (view !== "modalities") setLast(view);
+  }
+  function setLast(key) { lsSet(LAST_KEY, key); }
+  function placeName(p) { return p.view ? placeOf(p.view).name : (threadOf(p.thread)?.data.title || "a thread"); }
+  function onScreen(p) {
+    if (document.visibilityState !== "visible") return false;
+    if (p.view) return emb?.view === p.view && visible(strip);
+    return st.open === p.thread && shell.classList.contains("thread-open") && visible(main);
+  }
+  function pillTop() { return [...pills.values()].filter(p => !onScreen(p)).sort((a, b) => b.at - a.at)[0]; }
+  function drawPill() {
+    if (!pill) return;
+    for (const [id, p] of pills) if (p.done && onScreen(p)) pills.delete(id); // seen
+    lsSet(PILLS_KEY, [...pills.values()]);
+    const away = [...pills.values()].filter(p => !onScreen(p)).sort((a, b) => b.at - a.at);
+    if (!feat("replyPill") || !away.length) { pill.hidden = true; return; }
+    const p = away[0], name = placeName(p);
+    pillT.textContent = p.done ? `${agentName} replied in ${name}` : `${agentName} is working in ${name}`;
+    pillS.hidden = !!p.done;
+    pillN.hidden = away.length < 2; pillN.textContent = away.length < 2 ? "" : `+${away.length - 1}`;
+    pill.dataset.tip = `Go to ${name} (swipe to dismiss)`;
+    pill.setAttribute("aria-label", pill.dataset.tip);
+    const above = visible(strip) && emb?.view ? strip.getBoundingClientRect().top : mb.el.getBoundingClientRect().top;
+    pill.style.setProperty("--pill-b", `${Math.max(0, innerHeight - above) + 8}px`);
+    pill.hidden = false;
+  }
+  function pillAdd(id, view, thread) {
+    if (!id) return;
+    pills.set(id, { id, view: view || "", thread: thread || "", at: Date.now(), done: false });
+    drawPill();
+  }
+  function pillUpdate(item) {
+    const p = pills.get(item?.id); if (!p) return;
+    const done = FIN.includes(item.data?.status);
+    if (done && !p.done) p.at = Date.now();
+    p.done = done; drawPill();
+  }
+  async function goConversation(p) {
+    if (p.id) pills.delete(p.id);
+    try {
+      if (!p.view) {
+        if (ctx.levels && ctx.levels.current() !== "chat") await ctx.levels.go("chat");
+        await openThread(p.thread, true);
+      } else {
+        const pl = placeOf(p.view);
+        if (!(ctx.levels?.current() === pl.level && emb?.view === p.view)) await ctx.levels?.go(pl.level, pl.sub);
+        if (pl.level === "chat" && shell.classList.contains("thread-open")) showList(true);
+        for (let i = 0; i < 60 && !(emb?.view === p.view && st.hist); i++) await new Promise(r => setTimeout(r, 50));
+        if (emb?.view === p.view && st.hist) openStrip(true);
+      }
+    } finally { drawPill(); }
+  }
+  ctx.conversations = {
+    recent: async () => {
+      const last = lsGet(LAST_KEY, "");
+      const rows = await ctx.api(`${API}/recent`);
+      return rows.filter(r => r.view !== "modalities")
+        .map(r => { if (r.view && r.place && !places[r.view]) places[r.view] = r.place;
+          return { ...r, name: r.view ? placeOf(r.view).name : r.title, here: (r.view || r.id) === last }; });
+    },
+    open: r => goConversation(r.view ? { view: r.view } : { thread: r.id }),
+  };
+  fx?.handle("chat", "pill_show", async ({ target }) => {
+    let p = { id: `agent-${Date.now()}`, view: target, thread: "", at: Date.now(), done: true };
+    try {
+      const it = await ctx.api(`/k/items/${encodeURIComponent(target)}`);
+      if (it?.type === "thread") p = { ...p, view: it.data.view || "", thread: it.data.view ? "" : it.id };
+    } catch { /* not an item: a view name */ }
+    pills.set(p.id, p); drawPill();
+    if (pill.hidden) throw new Error(feat("replyPill") ? "that conversation is on screen already" : "the reply pill is switched off");
+    return `the pill points at ${placeName(p)}`;
+  });
+  fx?.handle("chat", "pill_clear", async () => { pills.clear(); drawPill(); return "pill cleared"; });
+  ctx.levels?.onChange(() => setTimeout(drawPill, 250));
+  addEventListener("resize", () => drawPill());
+  document.addEventListener("visibilitychange", () => drawPill());
+  setInterval(() => { if (pills.size) drawPill(); }, 1000);
+  for (const p of [...pills.values()]) if (!p.done && !p.id.startsWith("agent-"))
+    ctx.api(`/k/items/${encodeURIComponent(p.id)}`).then(pillUpdate).catch(() => { pills.delete(p.id); drawPill(); });
 
   // ------------------------------------------------------------ keys + start
   addEventListener("keydown", e => {

@@ -1,18 +1,23 @@
-// Hands-free talk: a voice conversation in a thread without touching the
-// screen (phone in a pocket or on a shelf). One tap on the sound-wave icon
-// (thread bar, or the list header for a new thread) starts it:
+// Hands-free talk: a voice conversation without touching the screen (phone
+// in a pocket or on a shelf). It is a modality of the shared bar: one tap on
+// the sound-wave button (between keyboard and mic, in every view) starts it,
+// and each turn goes to whatever the bar talks to (the open thread, the
+// thread list's conversation, a Columns board...):
 //   - the mic stays open; an AudioWorklet (vad.js) taps it and this module
 //     finds each turn: speech, then SILENCE_MS of quiet = end of turn
 //   - the turn (16 kHz WAV) goes to POST /p/talk/hear (fast transcription),
-//     then to the thread as a normal voice message with that transcript, so
-//     the thread keeps everything and the modality bar stays as it is
+//     then through the bar (ctx.bar.deliver) as a normal voice message with
+//     that transcript, so that conversation keeps everything
+//   - while it runs the bar shows its live row: X (or Esc) ends it, level
+//     bars, what happens (listening / hearing you / thinking / speaking) and
+//     the elapsed time, a pause button on the right
 //   - the reply is spoken while it streams, a sentence at a time
 //     (POST /p/talk/speak, Kokoro); listening goes on during playback, and
 //     talking over the reply stops it (barge-in)
 //   - spoken controls: "pause" (only "resume" / "stop listening" count
 //     until resumed), "stop" (quiet now), "stop listening" (ends it)
 //   - a screen wake lock keeps the phone awake while it runs
-// Plain JavaScript, an extension of the chat: extend(host, ctx).
+// Plain JavaScript, an extension: extend(host, ctx); it only needs ctx.bar.
 const WAVE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h2M7 8v8M11 4v16M15 8v8M19 11v2M21 12h0"/></svg>';
 const PAUSE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6v12M15 6v12"/></svg>';
 const PLAY = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5l11 7-11 7z"/></svg>';
@@ -28,7 +33,7 @@ const h = (tag, attrs = {}, ...kids) => {
   return el;
 };
 
-const API = "/p/talk", CHAT = "/p/chat";
+const API = "/p/talk";
 const RATE = 16000; // what the transcriber wants
 const SILENCE_MS = 1200; // quiet after speech = end of turn
 const START_MS = 120; // this much speech starts a turn
@@ -88,44 +93,19 @@ export function nextPiece(text, from, first, final) {
 }
 
 export function extend(host, ctx) {
-  if (!host?.el?.bar || !navigator.mediaDevices?.getUserMedia) return;
+  if (!ctx.bar?.modality || !navigator.mediaDevices?.getUserMedia) return;
   const log = window.__talkLog = []; // timings for tests: {t, ev, ...}
   const mark = (ev, extra = {}) => { const e = { t: Math.round(performance.now()), ev, ...extra }; log.push(e); if (log.length > 400) log.shift(); return e; };
 
   // ------------------------------------------------------------ controls
-  const make = where => {
-    const b = h("button", { class: "c-btn c-ic tk-btn", type: "button", "data-tip": "Hands-free talk", "aria-label": "Hands-free talk",
-      onclick: () => (s ? stop("Hands-free talk off") : start(where)) }, icon(WAVE));
-    return b;
-  };
-  const btnThread = make("thread");
-  host.el.bar.append(btnThread);
-  const listBar = host.el.bar.closest(".c-shell")?.querySelector(".c-side .c-bar");
-  const btnList = listBar ? make("list") : null;
-  if (btnList) listBar.insertBefore(btnList, listBar.querySelector(".c-add"));
-
-  const lv = [0, 1, 2, 3, 4].map(() => h("u"));
-  const word = h("span", { class: "tk-word" }, "");
-  const pauseBtn = h("button", { class: "c-btn c-ic tk-pause", type: "button", "data-tip": "Pause (or say \u201cpause\u201d)", "aria-label": "Pause",
+  // the entry point: a modality button in the shared bar, between keyboard
+  // and mic (the mic stays rightmost, nearest the thumb, as the most used)
+  const mod = ctx.bar.modality({ id: "talk", tip: "Hands-free talk", icon: WAVE, order: 30, onclick: () => (s ? stop() : start()) });
+  const pauseBtn = h("button", { class: "mb-btn mb-ic tk-pause", type: "button", "data-tip": "Pause (or say \u201cpause\u201d)", "aria-label": "Pause",
     onclick: () => (s?.paused ? resume() : pause()) }, icon(PAUSE));
-  const endBtn = h("button", { class: "c-btn c-ic tk-end", type: "button", "data-tip": "Stop hands-free talk (or say \u201cstop listening\u201d)", "aria-label": "Stop hands-free talk",
-    onclick: () => stop("Hands-free talk off") }, "\u2715");
-  const panel = h("div", { class: "tk-panel", role: "status", "aria-live": "polite", hidden: true },
-    h("span", { class: "tk-lv", "aria-hidden": "true" }, lv), word, pauseBtn, endBtn);
-
-  const show = (what, cls) => {
-    word.textContent = what; panel.dataset.state = cls;
-    for (const b of [btnThread, btnList]) b?.classList.toggle("on", !!s);
-  };
-  const place = () => {
-    const main = host.el.bar.closest(".c-shell");
-    if (!main) return;
-    const anchor = main.classList.contains("thread-open") ? btnThread : (btnList || btnThread);
-    const p = main.getBoundingClientRect(), r = anchor.getBoundingClientRect();
-    if (panel.parentElement !== main) main.append(panel);
-    panel.style.top = `${r.bottom - p.top + 4}px`;
-    panel.style.right = `${Math.max(4, p.right - r.right)}px`;
-  };
+  // state words and their colour in the bar: pink = it hears you, purple = the agent speaks
+  const TONE = { hear: "here", speak: "agent" };
+  const show = (what, cls) => { if (s) mod.word(what, TONE[cls]); };
 
   // ------------------------------------------------------------ sounds
   // short tones so the user knows what happens without looking
@@ -143,11 +123,13 @@ export function extend(host, ctx) {
 
   // ------------------------------------------------------------ session
   let s = null; // the running conversation
-  async function start(where) {
+  async function start() {
     if (s) return;
-    const session = s = { thread: null, paused: false, mode: "listening", turn: null, ring: [], floor: 0.004, speech: 0, quiet: 0,
+    const session = s = { paused: false, mode: "listening", turn: null, ring: [], floor: 0.004, speech: 0, quiet: 0,
       reply: null, queue: [], playing: null, busy: 0, lock: null, ac: null, stream: null, wake: null };
-    show("Starting\u2026", "busy"); panel.hidden = false; place();
+    mod.live({ stop: () => stop(), stopTip: "Stop hands-free talk (Esc, or say \u201cstop listening\u201d)", extra: [pauseBtn] });
+    pauseBtn.replaceChildren(icon(PAUSE)); pauseBtn.dataset.tip = "Pause (or say \u201cpause\u201d)";
+    show("Starting\u2026", "busy");
     try {
       session.ac = new AudioContext();
       await session.ac.resume(); // inside the tap: unlocks playback for the whole session
@@ -159,19 +141,14 @@ export function extend(host, ctx) {
       src.connect(tap).connect(mute).connect(session.ac.destination); // keeps the worklet pulled
       tap.port.onmessage = e => { if (s === session) hearBlock(e.data.rms, e.data.block); };
       session.tap = tap;
-      let t = host.thread();
-      if (where === "list" || !t) {
-        t = await ctx.api(`${CHAT}/threads`, { json: { title: "Hands-free talk" } });
-        await host.open(t);
-      }
-      session.thread = t.id;
       if (s !== session) return;
       await wakeLock();
-      mark("start", { thread: t.id });
+      mark("start", { target: ctx.bar.focused() });
       tone([520, 780]); show("Listening", "listen");
     } catch (e) {
       console.error(e); const why = e?.name === "NotAllowedError" ? "Microphone blocked" : `Could not start: ${e.message || e}`;
       stop(why);
+      ctx.bar.say(why, true);
     }
   }
 
@@ -182,8 +159,8 @@ export function extend(host, ctx) {
     session.stream?.getTracks().forEach(t => t.stop());
     session.wake?.release().catch(() => {});
     s = null; mark("stop", { why });
-    show(why, "off"); for (const b of [btnThread, btnList]) b?.classList.remove("on");
-    setTimeout(() => { if (!s) panel.hidden = true; }, why ? 2500 : 0);
+    mod.end();
+    if (why) { ctx.bar.say(why); setTimeout(() => { if (!s) ctx.bar.say(""); }, 2500); }
   }
   addEventListener("pagehide", () => stop());
 
@@ -213,7 +190,7 @@ export function extend(host, ctx) {
     s.floor = rms < s.floor ? rms : s.floor * 0.999 + rms * 0.001;
     const loud = rms > Math.max(playing ? 0.03 : 0.012, s.floor * (playing ? 6 : 3.5));
     window.__talkLevel = { rms, floor: s.floor, playing, loud }; // for tests
-    lv.forEach((u, i) => { u.style.transform = `scaleY(${Math.min(1, 0.15 + rms * (18 + i * 4))})`; });
+    mod.level(Math.min(1, rms * 25));
     if (!s.turn) {
       s.ring.push(block); while (s.ring.length * ms > PREROLL_MS) s.ring.shift();
       s.speech = loud ? s.speech + ms : 0;
@@ -247,14 +224,15 @@ export function extend(host, ctx) {
       const text = (heard.text || "").trim();
       if (!text || !heard.file) return;
       const c = control(text);
-      if (c === "end") return stop("Stopped: \u201cstop listening\u201d");
+      if (c === "end") return stop("Hands-free talk stopped: \u201cstop listening\u201d");
       if (c === "pause") return pause();
       if (c === "resume") return resume();
       if (c === "hush") { hush(); return; }
       if (session.paused) { mark("ignored-paused", { text }); return; }
-      const out = await ctx.api(`${CHAT}/threads/${encodeURIComponent(session.thread)}/messages`,
-        { json: { voice: heard.file, transcript: text, text: "", context: NOTE } });
-      mark("posted", { reply: out.reply.id, ms: Math.round(performance.now() - ended.t) });
+      // to whatever the bar talks to now: that view's conversation answers
+      const out = await ctx.bar.deliver({ voice: heard.file, transcript: text, text: "", files: [], context: NOTE });
+      if (!out?.reply?.id) throw new Error("this view does not answer by voice");
+      mark("posted", { reply: out.reply.id, target: ctx.bar.focused(), ms: Math.round(performance.now() - ended.t) });
       if (s !== session) return;
       session.reply = { id: out.reply.id, text: "", spoken: 0, done: false, pieces: 0, ended };
     } catch (e) {

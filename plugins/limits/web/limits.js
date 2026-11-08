@@ -75,13 +75,14 @@ export function mount(box, ctx) {
     if (!d) { body.replaceChildren(h("p", { class: "rl-note" }, st.err ? `Could not load: ${st.err}` : "…")); return; }
     const bals = d.balances || [];
     if (!d.providers.length && !bals.length) { body.replaceChildren(h("p", { class: "rl-note" }, "No sources configured (plugins.limits.balances, plugins.limits.sources).")); return; }
-    body.replaceChildren(...bals.map(credit), ...d.providers.map(p => h("section", { class: "rl-p", "data-k-id": p.id, "data-k-kind": "subscription", "data-k-label": p.name },
+    body.replaceChildren(...d.providers.map(p => h("section", { class: "rl-p", "data-k-id": p.id, "data-k-kind": "subscription", "data-k-label": p.name },
       h("p", { class: "rl-ph" }, h("b", {}, p.name),
         p.plan ? h("span", { class: "rl-plan" }, p.plan) : null,
         p.stale ? h("span", { class: "rl-flag", "data-tip": "The last reading is old; the fetcher may be stuck" }, "stale") : null,
         p.error ? h("span", { class: "rl-flag" }, p.error) : null,
         p.updated_at ? h("small", { class: "rl-upd" }, `updated ${ago(p.updated_at)}`) : null),
       ordered(p.windows).map((w, i) => bar(w, p.stale, i === 0 && w.label === "7d")))),
+      ...bals.map(credit),
       h("p", { class: "rl-note" }, `checked ${ago(d.fetched_at)} · refreshes every minute`));
   }
   async function load() {
@@ -94,10 +95,10 @@ export function mount(box, ctx) {
   document.addEventListener("visibilitychange", tick);
 
   const describe = () => `[Sent from the Sleipnyr Balance modality: read-only money balances and remaining percent of each AI subscription's rate limits. On screen:\n`
+    + (st.data?.providers || []).map(p => `- ${p.name}${p.plan ? ` (${p.plan})` : ""}${p.error ? `: ${p.error}` : ""}${p.stale ? " (stale)" : ""}`
+      + p.windows.map(w => `\n  ${wname(w)} ${w.label}: ${w.left == null ? "not reported" : Math.round(w.left) + "% left"}${w.resets_at ? `, resets ${new Date(w.resets_at * 1000).toString()}` : ""}`).join("")).join("\n") + "\n"
     + (st.data?.balances || []).map(b => `- ${b.name}: ${b.amount == null ? b.error || "no data" : money(b.amount, b.currency)}${b.stale ? " (stale)" : ""}`
       + b.facts.map(f => `, ${f.label} ${f.value}`).join("") + (b.updated_at ? `, checked ${new Date(b.updated_at * 1000).toString()}` : "") + "\n").join("")
-    + (st.data?.providers || []).map(p => `- ${p.name}${p.plan ? ` (${p.plan})` : ""}${p.error ? `: ${p.error}` : ""}${p.stale ? " (stale)" : ""}`
-      + p.windows.map(w => `\n  ${wname(w)} ${w.label}: ${w.left == null ? "not reported" : Math.round(w.left) + "% left"}${w.resets_at ? `, resets ${new Date(w.resets_at * 1000).toString()}` : ""}`).join("")).join("\n")
     + `\nThis chat is the Balance view's own history. Reply briefly. The view has no actions.]`;
   const run = async () => { throw new Error("this view has no actions"); };
 

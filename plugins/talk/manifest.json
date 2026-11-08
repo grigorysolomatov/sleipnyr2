@@ -3,10 +3,10 @@
   "name": "Hands-free talk",
   "version": "1.0.0",
   "contract": 1,
-  "doc": "Hands-free voice conversation in a thread: one tap opens the mic; the page detects the end of each turn, the speech is transcribed fast on the server and sent to the thread as a normal voice message, and the agent's reply is spoken (Kokoro) while it streams; the mic reopens after playback, talking over a reply stops it. Spoken controls: pause, resume, stop listening.",
+  "doc": "Hands-free voice conversation, a modality of the shared bar in every view: one tap opens the mic; the page detects the end of each turn, the speech is transcribed fast on the server and sent to the conversation the bar talks to as a normal voice message, and the agent's reply is spoken (Kokoro) while it streams; the mic reopens after playback, talking over a reply stops it. Spoken controls: pause, resume, stop listening.",
   "permissions": { "read": ["thread", "message", "file"], "write": ["file"], "network": ["plugins.talk.hearUrl", "plugins.talk.speakUrl"] },
   "commands": [
-    { "name": "talk", "doc": "Hands-free voice conversation in the open thread" }
+    { "name": "talk", "doc": "Hands-free voice conversation with the view on screen" }
   ],
   "web": { "entry": "web/talk.js", "styles": ["web/talk.css"] }
 }

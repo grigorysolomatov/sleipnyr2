@@ -29,7 +29,9 @@ import type {
   AgentService, AgentTurn, AttachedFile, FileData, Item, Kernel, ServerPlugin, TranscribeService,
 } from "../../kernel/contract.ts";
 
-export interface Thread { title: string; titleAuto?: boolean; agent: string; state: Record<string, unknown>; hidden?: boolean; view?: string; unread?: boolean }
+export interface Thread { title: string; titleAuto?: boolean; agent: string; state: Record<string, unknown>; hidden?: boolean; view?: string; unread?: boolean;
+  /** view threads: where the page last showed this conversation (level, sub, name), so any device can open it */
+  place?: { level: string; sub: string; name: string } }
 export interface Action { name: string; args: string; body?: string }
 /** A declared agent action (kernel/actions.ts) the agent called during this reply's turn. */
 export interface CallNote { id: string; text: string }
@@ -255,6 +257,24 @@ class Chat {
   threads(hidden = false) {
     return this.k.items.list<Thread>({ type: "thread", order: "-updated", limit: 1000 })
       .filter(t => !t.data.view && !!t.data.hidden === hidden).slice(0, 500);
+  }
+  /** Recent conversations across all views: threads and view histories, newest
+   *  message first, with its last line. Hidden (archived) threads stay out. */
+  recent(limit = 30) {
+    const last = new Map<string, Item<Message>>();
+    for (const m of this.k.items.list<Message>({ type: "message", order: "-updated", limit: 3000 })) {
+      if (!last.has(m.data.thread)) last.set(m.data.thread, m);
+      if (last.size >= limit * 2) break;
+    }
+    const out: { id: string; view: string; title: string; role: string; text: string; status: string; updated: number; place?: Thread["place"] }[] = [];
+    for (const [id, m] of last) {
+      const t = this.k.items.get<Thread>(id);
+      if (!t || t.data.hidden) continue;
+      const text = String(m.data.text || m.data.transcript || "").replace(/\s+/g, " ").trim().slice(0, 200);
+      out.push({ id, view: t.data.view || "", title: t.data.title, role: m.data.role, text, status: m.data.status, updated: Number(m.updated), place: t.data.place });
+      if (out.length >= limit) break;
+    }
+    return out;
   }
   messages(thread: string) { return this.k.items.list<Message>({ type: "message", linkedTo: { rel: "in", to: thread }, order: "created" }); }
 
@@ -572,6 +592,7 @@ const plugin: ServerPlugin = {
     const c = () => chat!;
     return {
       "GET /agents": () => Response.json(c().agents()),
+      "GET /recent": () => Response.json(c().recent()),
       "GET /threads": req => Response.json(c().threads(new URL(req.url).searchParams.get("hidden") === "1")),
       "POST /views/:view/thread": (_req, p) => { try { return Response.json(c().viewThread(p.view)); } catch (e) { return bad(e); } },
       "POST /threads": async req => {

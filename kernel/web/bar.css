@@ -23,7 +23,17 @@
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .mb-to::before { content: "→ "; }
-.mb.typing .mb-to, .mb.rec .mb-to { display: none; }
+.mb.typing .mb-to, .mb.rec .mb-to, .mb.live .mb-to { display: none; }
+/* the same target on a phone: a small grey line above the icons, pink arrow */
+.mb-where { display: none; }
+@media (max-width: 759px) {
+  .mb-where {
+    display: block; text-align: center; color: var(--text-muted); font-size: .75em; line-height: 1.5;
+    padding: 0 1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+}
+.mb-where::before { content: "→ "; color: var(--accent-here); }
+.mb.typing .mb-where, .mb.rec .mb-where, .mb.live .mb-where { display: none; }
 /* drop images anywhere in the app */
 #app.mb-drop { position: relative; }
 #app.mb-drop::after {
@@ -31,10 +41,13 @@
   border: 2px dashed var(--text-muted); border-radius: var(--radius); background: var(--bg); opacity: .92; pointer-events: none;
 }
 
-/* Three states, one row each:
-     idle       attach, keyboard, mic (mic rightmost, nearest the thumb)
+/* Four states, one row each:
+     idle       attach, keyboard, plugin modalities (hands-free talk), mic
+                (mic rightmost, nearest the thumb)
      typing     X, text field, send
      recording  X, level bars + timer (centred), send
+     live       a plugin modality running: X, level bars + word + time
+                (centred), its own buttons right
    The send feedback is the message sliding in; the bar itself does not flash. */
 /* flex none + own fill + above the view: the bar never shrinks, and a view
    that overflows slides under it instead of showing through */
@@ -54,7 +67,8 @@
 .mb-when .mb-def { border-color: var(--accent-here); }
 .mb-row { position: relative; display: flex; align-items: flex-end; gap: .4rem; }
 .mb-modes { display: flex; gap: var(--modes-gap); flex: 1; justify-content: var(--modes-align); }
-.mb-modes .mb-attach { order: 1; } .mb-modes .mb-keys { order: 2; } .mb-modes .mb-mic { order: 3; }
+/* plugin buttons (.mb-mod) set their own order, default 30: between keyboard and mic */
+.mb-modes .mb-attach { order: 10; } .mb-modes .mb-keys { order: 20; } .mb-modes .mb-mic { order: 40; }
 .mb-attach { font-size: 1.3rem; }
 .mb-ic { display: inline-grid; place-items: center; padding: 0; width: 2.75rem; }
 .mb-ic svg { width: 1.35rem; height: 1.35rem; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
@@ -75,6 +89,7 @@
 .mb.typing .mb-send, .mb.has-files .mb-send, .mb.rec .mb-send { display: inline-grid; }
 .mb.typing .mb-modes { display: none; }
 .mb.rec .mb-modes, .mb.rec .mb-input, .mb.rec .mb-close { display: none; }
+.mb.live .mb-modes, .mb.live .mb-input, .mb.live .mb-close, .mb.live .mb-send { display: none; }
 
 /* recording: the spacer after the bars + timer balances the X, so they sit centred;
    the hint shows only as the no-signal warning */
@@ -90,6 +105,20 @@
 .mb-lv { order: 1; display: inline-flex; align-items: center; gap: 2px; height: 18px; }
 .mb-lv u { display: block; width: 3px; height: 18px; background: var(--rec-color); border-radius: 1px; transform: scaleY(.15); transition: transform 60ms linear; }
 .mb-rec.quiet .mb-lv u { background: var(--text-muted); }
+
+/* a plugin modality running (bar.modality().live): X left, its buttons right, the rest centred */
+.mb-live { flex: 1; display: flex; align-items: center; gap: .4rem; min-height: 2.5rem; min-width: 0; }
+.mb-live > .mb-btn, .mb-live-x .mb-btn { border-color: var(--icon-frame); }
+.mb-live-mid { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; gap: .6rem; }
+.mb-live-mid small { color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.mb-live-mid b { flex: none; color: var(--text-muted); font-weight: 400; font-variant-numeric: tabular-nums; }
+.mb-live-x { display: flex; gap: .25rem; min-width: 2.5rem; justify-content: flex-end; }
+.mb-live .mb-lv { flex: none; }
+.mb-live .mb-lv u { background: var(--text-muted); }
+.mb-live[data-tone="here"] .mb-lv u { background: var(--accent-here); }
+.mb-live[data-tone="here"] .mb-live-mid small { color: var(--accent-here); }
+.mb-live[data-tone="agent"] .mb-lv u { background: var(--accent-agent); }
+.mb-live[data-tone="agent"] .mb-live-mid small { color: var(--accent-agent); }
 
 .mb-tray { display: flex; gap: .4rem; overflow-x: auto; }
 .mb-tray figure { position: relative; margin: 0; flex: none; }

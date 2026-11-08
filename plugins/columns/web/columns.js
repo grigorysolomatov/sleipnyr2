@@ -24,6 +24,11 @@
 //              | file (ref = file id) | url (ref = http(s) URL) | note (text = Markdown)
 //     highlight  the panel the agent points at ("look here"); a tap clears it
 //     fresh    the agent marked the panel new (green frame); a tap or unfolding clears it
+//     decide   {state: open|accepted|dismissed, board?, log: [{at, verdict, comment?, card?, error?}], card?}
+//              a panel that takes decisions (e.g. a suggested task): Dismiss, Comment and Accept
+//              sit at its foot; the server records them and hands accept/comment to the agent as an
+//              unassigned Kanban card (POST /p/columns/<board>/decide). Dismissed panels are
+//              archived, shown again from the column's foot, and can be reopened.
 // Saves are conditional (x-if-updated) and replay our own changes onto a newer
 // copy per column, per panel and per field, so two devices or the agent never
 // overwrite each other. The column on screen is remembered per device.
@@ -42,6 +47,11 @@ const FULL = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 
 const CLOSE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
 const PEN = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg>';
 const CHECK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg>';
+// the same archive glyphs as Blackboards' hide/bring back, the bar's send arrow
+const BOX = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M10 12h4"/></svg>';
+const UNBOX = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M12 18v-6M9.5 14.5L12 12l2.5 2.5"/></svg>';
+const SEND = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg>';
+const SAY = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H10l-5 4v-4H4z"/></svg>';
 
 const KINDS = {
   note: "Note", thread: "Thread", threads: "Thread list", tinder: "Task Tinder", projects: "Projects", file: "File", url: "Web page",
@@ -100,7 +110,7 @@ export function mergeList(base, local, server) {
 
 export function mount(box, ctx) {
   const WHO = ctx.user?.name || "the user", AG = ctx.app?.agentName || "the agent";
-  const st = { item: null, list: [], last: "", base: null, baseAt: 0, saveTimer: 0, here: "", threads: [], els: new Map(), cels: new Map(), at: "" };
+  const st = { item: null, list: [], last: "", base: null, baseAt: 0, saveTimer: 0, here: "", threads: [], els: new Map(), cels: new Map(), at: "", showDis: false };
   box.classList.add("co-level");
   const back = h("button", { class: "co-back", type: "button", onclick: () => (st.item ? ctx.levels.go(ME, "") : ctx.levels.up()) }, BACK);
   const titleEl = h("b", { class: "co-title" }, "Columns");
@@ -122,6 +132,8 @@ export function mount(box, ctx) {
   const panels = () => data()?.panels || [];
   const findP = id => panels().find(p => p.id === id);
   const inCol = cid => panels().filter(p => p.col === cid).sort((a, b) => a.order - b.order);
+  const dismissed = p => p.decide?.state === "dismissed";
+  const shownIn = cid => inCol(cid).filter(p => st.showDis || !dismissed(p)); // dismissed ones wait at the column's foot
   // a column by id, by exact or loose title, or by its number (1 = leftmost)
   function findC(ref) {
     const r = String(ref || "").trim().toLowerCase(); if (!r) return null;
@@ -148,6 +160,7 @@ export function mount(box, ctx) {
     const r = await fetch(`/k/items/${encodeURIComponent(it.id)}`, { method: "PATCH", body: JSON.stringify(body),
       headers: { "content-type": "application/json", ...(st.baseAt ? { "x-if-updated": String(st.baseAt) } : {}) } });
     const out = await r.json().catch(() => ({}));
+    if (st.item !== it) return null; // left this board meanwhile: its answer must not touch the next one
     if (r.status === 409 && out.item) return out.item;
     if (!r.ok) throw new Error(out.error || `HTTP ${r.status}`);
     if (!st.baseAt || out.updated > st.baseAt) setBase(out);
@@ -170,6 +183,8 @@ export function mount(box, ctx) {
   }
   // leaving a board: only a change still waiting is saved (a visit alone keeps its place in the list)
   const flush = () => (st.saveTimer ? save(true) : saving || Promise.resolve());
+  // leaving never waits on the network: a stalled save gets a moment, then goes on alone
+  const settle = (pr, ms = 800) => Promise.race([pr.catch(() => {}), new Promise(ok => setTimeout(ok, ms))]);
   function takeRemote(it) { const was = rects(); rebase(it); draw(); glideFrom(was); }
   // never redraw under a finger: a copy arriving mid-drag waits until it ends
   function remote(it) {
@@ -231,9 +246,15 @@ export function mount(box, ctx) {
     cols().forEach((c, i) => {
       const ce = drawCol(c, i);
       if (strip.children[i] !== ce.el) strip.insertBefore(ce.el, strip.children[i] || null);
-      const list = inCol(c.id);
+      const list = shownIn(c.id), gone = inCol(c.id).filter(p => !list.includes(p));
+      for (const p of gone) st.els.get(p.id)?.el.remove();
       list.forEach((p, j) => { const e = drawPanel(p); if (ce.list.children[j] !== e.el) ce.list.insertBefore(e.el, ce.list.children[j] || null); });
-      if (!list.length) ce.list.append(ce.empty); else ce.empty.remove();
+      if (!list.length) ce.list.insertBefore(ce.empty, ce.list.children[0] || null); else ce.empty.remove();
+      const nd = inCol(c.id).filter(dismissed).length;
+      ce.dis.hidden = !nd;
+      ce.dis.textContent = st.showDis ? "Hide dismissed" : `Show ${nd} dismissed`;
+      ce.dis.dataset.tip = st.showDis ? "Put the dismissed suggestions away again" : "Dismissed suggestions are kept: show them to reopen one";
+      ce.list.append(ce.dis);
     });
     if (!cols().length) strip.replaceChildren(h("p", { class: "co-empty" }, "No columns yet. Tap + (top right) for a new one."));
     else strip.querySelector(":scope > .co-empty")?.remove();
@@ -247,8 +268,9 @@ export function mount(box, ctx) {
       const next = icon(RIGHT, "Next column", () => go(1), "co-next");
       const list = h("div", { class: "co-list" });
       const empty = h("p", { class: "co-empty" }, "Nothing here yet.");
+      const dis = h("button", { class: "c-btn co-disb", type: "button", hidden: true, onclick: () => { st.showDis = !st.showDis; const was = rects(); draw(); glideFrom(was); } });
       const el = h("section", { class: "co-col", "data-id": c.id, "data-k-id": c.id, "data-k-kind": "column" }, h("header", { class: "co-chead" }, prev, name, next), list);
-      ce = { el, name, prev, next, list, empty }; st.cels.set(c.id, ce);
+      ce = { el, name, prev, next, list, empty, dis }; st.cels.set(c.id, ce);
     }
     ce.name.textContent = c.title || "Untitled"; ce.el.dataset.kLabel = ce.name.textContent;
     ce.el.classList.toggle("hl", data().highlight?.id === c.id);
@@ -261,11 +283,13 @@ export function mount(box, ctx) {
       const name = h("span", { class: "co-pname" });
       const fold = icon(UP, "Fold", () => setCollapsed(p.id, !findP(p.id)?.collapsed, true), "co-fold");
       const edit = p.kind === "note" ? icon(PEN, "Edit the note", () => toggleEdit(p.id), "co-edit") : null;
-      const bar = h("div", { class: "co-pbar" }, name, edit, p.kind === "note" ? null : icon(FULL, "Open in full", () => openFull(p.id)), fold,
-        icon(CLOSE, "Remove panel", () => closeP(p.id)));
+      const close = icon(CLOSE, "Remove panel", () => closeP(p.id), "co-close");
+      const state = h("span", { class: "co-pstate" });
+      const bar = h("div", { class: "co-pbar" }, name, state, edit, p.kind === "note" ? null : icon(FULL, "Open in full", () => openFull(p.id)), fold, close);
       const content = h("div", { class: "co-pbody" });
-      const el = h("article", { class: "co-panel", "data-id": p.id, "data-k-id": p.id, "data-k-kind": `${p.kind} panel`, "data-k-order": "" }, bar, content);
-      e = { el, bar, name, fold, edit, content, frame: null, src: "", md: null, text: null, editing: false };
+      const foot = h("div", { class: "co-dec", hidden: true });
+      const el = h("article", { class: "co-panel", "data-id": p.id, "data-k-id": p.id, "data-k-kind": `${p.kind} panel`, "data-k-order": "" }, bar, content, foot);
+      e = { el, bar, name, state, fold, edit, close, content, foot, frame: null, src: "", md: null, text: null, editing: false, dec: "" };
       st.els.set(p.id, e);
       el.addEventListener("pointerdown", () => tapP(p.id), true);
       holdDrag(bar, p.id);
@@ -283,6 +307,7 @@ export function mount(box, ctx) {
     e.el.classList.toggle("view", cur.kind !== "note");
     const ft = cur.collapsed ? "Unfold" : "Fold";
     e.fold.dataset.tip = ft; e.fold.setAttribute("aria-label", ft); e.fold.replaceChildren(svg(cur.collapsed ? DOWN : UP));
+    drawDecide(cur, e);
     if (cur.kind === "note") { drawNote(cur, e); return e; }
     // a folded panel drops its frame (no page running behind a title bar)
     const src = srcOf(cur);
@@ -294,6 +319,75 @@ export function mount(box, ctx) {
     }
     return e;
   }
+  // ------------------------------------------------------------ decisions (accept / comment / dismiss)
+  const hm = t => new Date(Number(t)).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false });
+  const VERB = { accept: "Accepted", dismiss: "Dismissed", comment: "Commented", reopen: "Reopened" };
+  function decideLine(d) {
+    const last = (d.log || []).at(-1);
+    if (!last) return "";
+    const card = last.card ? `, handed to ${AG} as card ${last.card}` : last.verdict === "accept" && d.card ? `, card ${d.card.id}` : "";
+    return `${VERB[last.verdict] || last.verdict} ${hm(last.at)}${card}${last.error ? ` (recorded; the card failed: ${last.error})` : ""}`
+      + (last.comment ? `: “${last.comment.length > 140 ? last.comment.slice(0, 140) + "…" : last.comment}”` : "");
+  }
+  function drawDecide(p, e) {
+    const d = p.decide;
+    e.foot.hidden = !d; e.close.hidden = !!d; // a decided-on panel is never removed: dismiss archives it
+    e.el.classList.toggle("decided", !!d && d.state !== "open");
+    e.el.classList.toggle("dismissed", !!d && d.state === "dismissed");
+    e.el.dataset.kState = d ? d.state : "";
+    e.state.textContent = d && d.state !== "open" ? (d.state === "accepted" ? "accepted" : "dismissed") : "";
+    if (!d) return;
+    const key = JSON.stringify([d.state, (d.log || []).length, e.busy || ""]);
+    if (e.dec === key && e.foot.childElementCount) return;
+    e.dec = key;
+    const ta = e.say?.querySelector("textarea"), keep = ta ? ta.value : "", open = !!e.say && !e.say.hidden;
+    const line = h("p", { class: "co-dline", "aria-live": "polite" }, e.busy || decideLine(d) || "Open: your call");
+    const btns = d.state === "dismissed"
+      ? [icon(UNBOX, "Reopen: back among the open suggestions", () => decide(p.id, "reopen"), "co-reopen")]
+      : [icon(BOX, "Dismiss (archived, can be reopened)", () => decide(p.id, "dismiss"), "co-dismiss"),
+        icon(SAY, `Comment: ask ${AG} to change it (not an accept)`, () => toggleSay(p.id), "co-say"),
+        d.state === "accepted" ? null : icon(CHECK, `Accept: hand it to ${AG} (nothing runs by itself)`, () => decide(p.id, "accept"), "co-accept")];
+    const field = h("textarea", { class: "co-sayt", rows: 2, "aria-label": "Comment", placeholder: "Comment" });
+    field.value = keep;
+    field.addEventListener("keydown", ev => {
+      if (ev.key === "Escape") { ev.stopPropagation(); toggleSay(p.id, false); }
+      if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); sendSay(p.id); }
+    });
+    e.say = h("div", { class: "co-sayrow", hidden: !open }, field, icon(SEND, "Send the comment", () => sendSay(p.id), "co-saysend"));
+    e.foot.replaceChildren(h("div", { class: "co-drow" }, line, h("span", { class: "co-dbtns" }, btns)), e.say);
+    if (e.busy) e.foot.querySelectorAll("button").forEach(b => { b.disabled = true; });
+  }
+  function toggleSay(id, on) {
+    const e = st.els.get(id); if (!e?.say) return;
+    const show = on ?? e.say.hidden;
+    e.say.hidden = !show;
+    if (show) e.say.querySelector("textarea").focus();
+  }
+  function sendSay(id) {
+    const e = st.els.get(id), t = e?.say?.querySelector("textarea")?.value.trim();
+    if (!t) { e?.say?.querySelector("textarea")?.focus(); return; }
+    decide(id, "comment", t);
+  }
+  // the server records it on the panel (and makes the card); the board then takes its copy
+  async function decide(id, verdict, comment) {
+    const e = st.els.get(id), p = findP(id); if (!e || !p?.decide || e.busy) return;
+    const open = e.say && !e.say.hidden ? e.say.querySelector("textarea").value.trim() : "";
+    comment = comment ?? (verdict === "accept" ? open : "");
+    e.busy = { accept: "Accepting…", dismiss: "Dismissing…", comment: "Sending…", reopen: "Reopening…" }[verdict];
+    drawDecide(p, e);
+    try {
+      await flush().catch(() => {});
+      const out = await ctx.api(`/p/${ME}/${encodeURIComponent(st.item.id)}/decide`, { json: { panel: id, verdict, ...(comment ? { comment } : {}) } });
+      e.busy = "";
+      if (comment && e.say) { e.say.querySelector("textarea").value = ""; e.say.hidden = true; }
+      if (out.item && out.item.updated > (st.baseAt || 0)) takeRemote(out.item); else drawDecide(findP(id) || p, e);
+      if (out.error) say(`Recorded, but the Kanban card failed: ${out.error}`, true);
+    } catch (err) {
+      e.busy = ""; drawDecide(findP(id) || p, e);
+      say(`Not recorded: ${err.message}`, true);
+    }
+  }
+
   function drawNote(p, e) {
     if (e.editing) return;
     const text = p.text || "";
@@ -384,7 +478,7 @@ export function mount(box, ctx) {
   }
   function startDrag(id, y) {
     const p = findP(id), e = st.els.get(id); if (!p || !e) return;
-    const list = inCol(p.col), ce = st.cels.get(p.col);
+    const list = shownIn(p.col), ce = st.cels.get(p.col);
     const others = list.filter(q => q.id !== id).map(q => ({ id: q.id, el: st.els.get(q.id).el, r: st.els.get(q.id).el.getBoundingClientRect() }));
     const r = e.el.getBoundingClientRect(), gap = parseFloat(getComputedStyle(ce.list).rowGap) || 12;
     drag = { id, y0: y, r, gap, others, from: list.findIndex(q => q.id === id), to: list.findIndex(q => q.id === id), ce, scroll0: ce.list.scrollTop, lastY: y };
@@ -422,8 +516,9 @@ export function mount(box, ctx) {
     for (const o of d.others) { o.el.style.transform = ""; o.el.classList.remove("glide"); }
     if (e) { e.el.classList.remove("drag"); e.el.style.transform = ""; }
     if (!cancelled && d.to !== d.from) {
-      const p = findP(d.id), list = inCol(p.col).filter(q => q.id !== d.id);
-      list.splice(d.to, 0, p); list.forEach((q, i) => { q.order = i; });
+      const p = findP(d.id), list = shownIn(p.col).filter(q => q.id !== d.id);
+      list.splice(d.to, 0, p);
+      [...list, ...inCol(p.col).filter(q => !list.includes(q))].forEach((q, i) => { q.order = i; }); // put-away ones keep their turn after
       draw(); save();
     }
     glideFrom(was);
@@ -606,7 +701,7 @@ export function mount(box, ctx) {
     await loadThreads();
     const at = cols()[atIdx()];
     const cs = cols().map((c, i) => `Column ${i + 1}: ${c.id} | ${c.title}${c.id === at?.id ? " | on screen" : ""}\n`
-      + (inCol(c.id).map((p, j) => `  ${j + 1}. ${p.id} | ${p.kind}${p.ref ? " " + p.ref : ""} | ${pTitle(p)}${p.collapsed ? " | folded" : ""}${data().highlight?.id === p.id ? " | highlighted" : ""}${p.fresh ? " | marked new" : ""}`
+      + (inCol(c.id).map((p, j) => `  ${j + 1}. ${p.id} | ${p.kind}${p.ref ? " " + p.ref : ""} | ${pTitle(p)}${p.collapsed ? " | folded" : ""}${data().highlight?.id === p.id ? " | highlighted" : ""}${p.fresh ? " | marked new" : ""}${p.decide ? ` | decision: ${p.decide.state}${p.decide.log?.length ? ` (${decideLine(p.decide)})` : ""}` : ""}`
         + (p.kind === "note" ? `\n     text:\n${(p.text || "(empty)").slice(0, 1500).replace(/^/gm, "       ")}` : "")).join("\n") || "  (empty)")).join("\n");
     const threads = st.threads.slice(0, 25).map(t => `- ${t.id} | ${t.data.title || ""}`).join("\n");
     const notes = data().agentNotes ? `[Agent notes, hidden from ${WHO}'s view, kept with the columns]\n${data().agentNotes}\n[End of agent notes]\n\n` : "";
@@ -621,6 +716,9 @@ export function mount(box, ctx) {
       + `@move <panel id> <column> [position]   (position 1 = top; without it, the bottom)\n`
       + `@collapse <panel id>\n@expand <panel id>\n@close <panel id>\n@title <panel id> <name>\n@focus <panel id>   (swipe to it and scroll it into view)\n`
       + `@highlight <panel or column id> [why]   (pink "look here" frame, one at a time)\n@unhighlight\n@new <panel id> [why]   (green "new" frame)\n@unnew <panel id>\n`
+      + `@suggest <column> [board=<kanban board>] <title>   (a suggested task: a note with Dismiss, Comment and Accept at its foot; text on the next lines, then @end: what you would do, why it is worth it, rough effort, what ${WHO} must provide)\n`
+      + `@decide <panel id> [kanban board]   (give any panel Dismiss, Comment and Accept)\n`
+      + `${WHO}'s decisions are recorded on the panel and reach you as unassigned Kanban cards; never decide for ${WHO}.\n`
       + `@memo <text>   (append to this board's hidden notes, shown to you at the top of every prompt from this board; for conventions ${WHO} agrees)\n@memo-clear\n`
       + `@rename-board <title>\n@back   (to the board list)\n`
       + `In notes, link files as [name](/k/files/<file id>) and pages as [name](https://...).\n`
@@ -675,6 +773,20 @@ export function mount(box, ctx) {
         data().agentNotes = next; return "memo";
       }
       case "memo-clear": data().agentNotes = ""; return "memo-clear";
+      case "suggest": {
+        const c = needC(first); let words = rest;
+        let board = "";
+        if (/^board=/.test(words[0] || "")) { board = words[0].slice(6); words = words.slice(1); }
+        const np = addP(c.id, "note", text || "", words.join(" ") || "Suggestion");
+        np.decide = { state: "open", ...(/^[a-z0-9][a-z0-9_-]{0,63}$/.test(board) ? { board } : {}), log: [] };
+        drawPanel(np); return `suggest ${np.id}`;
+      }
+      case "decide": {
+        const dp = needP(first);
+        if (!dp.decide) dp.decide = { state: "open", log: [] };
+        if (rest[0] && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(rest[0])) dp.decide.board = rest[0];
+        drawPanel(dp); return `decide ${first}`;
+      }
     }
     throw new Error("unknown command");
   }
@@ -696,11 +808,22 @@ export function mount(box, ctx) {
   async function show(sub) {
     const mine = ++showing;
     pick.hidden = true; say("");
+    if (!sub && st.list.length) {
+      // back to the list: shown at once from what we have, refreshed behind it
+      // (a slow or stalled phone connection must never keep him on the board)
+      if (st.item) await settle(flush());
+      if (mine !== showing) return;
+      st.item = null; st.here = ""; clearBoard();
+      drawList(); embed(`${ME}-boards`, "Board list conversation");
+      ctx.bar.focus(ME); chat?.retry?.();
+      if (await loadList() && mine === showing && !st.item) drawList();
+      return;
+    }
     const ok = !st.list.length || !sub ? await loadList() : true;
     if (ok && !st.list.length) { await newBoard(); return; } // the very first visit: one board to start with
     if (mine !== showing) return;
     if (!sub) {
-      if (st.item) await flush().catch(() => {});
+      if (st.item) await settle(flush());
       st.item = null; st.here = ""; clearBoard();
       drawList(); embed(`${ME}-boards`, "Board list conversation");
       ctx.bar.focus(ME); chat?.retry?.(); return;
@@ -710,7 +833,8 @@ export function mount(box, ctx) {
     if (mine !== showing) return;
     if (!it || it.type !== ME) { say("No such board.", true); ctx.levels.go(ME, ""); return; }
     if (st.item?.id !== it.id) {
-      if (st.item) await flush().catch(() => {});
+      if (st.item) await settle(flush());
+      if (mine !== showing) return;
       clearBoard();
       st.item = { ...it, data: { columns: [], panels: [], ...it.data } }; setBase(it);
       st.at = localStorage.getItem(atKey()) || (it.data.chatView === ME ? localStorage.getItem(AT_KEY) || "" : "");

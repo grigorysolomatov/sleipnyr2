@@ -219,3 +219,18 @@ body:has(.c-shell:not(.thread-open) .c-strip:not([hidden])) { --bar-line: var(--
 .c-error b { display: inline-grid; place-items: center; width: 1.2em; height: 1.2em; border: 1px solid var(--text); border-radius: 50%; font-size: .8em; }
 
 @media (prefers-reduced-motion: reduce) { .c-msg.c-arrive { animation: none; } }
+
+/* reply pill: a reply waits in a conversation that is not on screen; tap goes there */
+.c-pill {
+  position: fixed; left: 50%; bottom: var(--pill-b, 5rem); transform: translateX(-50%); z-index: 30;
+  display: flex; align-items: center; gap: .45rem; max-width: min(calc(100vw - 2rem), 32rem); padding: .4rem .85rem;
+  background: var(--bg, #000); color: var(--text, #fff); border: 1px solid var(--text, #fff); border-radius: 999px;
+  font: inherit; font-size: .85em; white-space: nowrap; cursor: pointer; touch-action: pan-y;
+}
+.c-pill-t { overflow: hidden; text-overflow: ellipsis; }
+.c-pill-t::after { content: " →"; color: var(--accent-here); }
+.c-pill-n { color: var(--text-muted); }
+.c-pill-spin {
+  flex: none; width: .8em; height: .8em; border: 2px solid var(--text-muted); border-top-color: transparent; border-radius: 50%;
+  animation: c-spin 1s linear infinite;
+}

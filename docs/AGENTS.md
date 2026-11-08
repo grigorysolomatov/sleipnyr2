@@ -23,9 +23,13 @@ Top level:
 
 - `listen` {host, port}: default 127.0.0.1:8180.
 - `dataDir`: folder for the database and files.
-- `app` {name, shortName, home, agentName}: `home` = plugin shown at "/"
-  (`chat`); `agentName` = how the UI and prompts name the agent ("Message
-  Agent", "Stop Agent"; default "Agent").
+- `app` {name, shortName, home, agentName, features}: `home` = plugin shown
+  at "/" (`chat`); `agentName` = how the UI and prompts name the agent
+  ("Message Agent", "Stop Agent"; default "Agent"). `features` {replyPill,
+  phoneTarget, recent} (all default true; false = off): replyPill = a pill
+  above the bar when a reply waits in a conversation that is off screen;
+  phoneTarget = the "-> target" line above the bar on phones; recent = a
+  "Recent" conversations list in the modality picker.
 - `user` {id, name}: `name` is the user's name in the UI and in prompts
   ("Ada named this thread", "Ada's agreed conventions").
 - `plugins` {<id>: settings}: a plugin runs only if its id is a key here.
@@ -107,15 +111,6 @@ list, Columns, Blackboards, Tinder) carry a bracketed note describing the
 view; the agent answers with one short sentence plus `@name args` action
 lines that the page runs (open, rename, hide, add, move...). The note lists
 the allowed lines; never invent others.
-
-## Kanban report-back (optional)
-
-With `kanbanReport` enabled (or `tools/kanban-report/kanban_report.py` running),
-a finished card posts a notice into its origin thread, which gives you a turn
-without a user message: report the card's result plainly. Origin = the thread
-of the Hermes session that created the card; to pin it, put
-`origin: sleipnyr2:<thread id>` on its own line in the card body. Notices are
-idempotent (key = board, card, event), so never repeat one yourself.
 
 ## Deploy, rollback, tests
 

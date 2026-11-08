@@ -80,6 +80,18 @@
     {
       "name": "reply_open", "level": "look",
       "doc": "Unfold the thread list's embedded chat (the reply above the bar) so the user sees the answer."
+    },
+    {
+      "name": "pill_show", "level": "look",
+      "doc": "Show the reply pill above the bar pointing at a conversation (a view name like threads or columns-<board id>, or a thread id); tapping it takes the user there with the chat open.",
+      "params": {
+        "target": {"type": "string", "doc": "view name or thread id", "pattern": "[A-Za-z0-9_:-]{1,80}"}
+      },
+      "required": ["target"]
+    },
+    {
+      "name": "pill_clear", "level": "look",
+      "doc": "Hide the reply pill and forget the replies it was pointing at."
     }
   ],
   "commands": [

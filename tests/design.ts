@@ -28,8 +28,8 @@ const STATES: State[] = [
   // the attach choice is a row of buttons over the bar, not a popover (open question in the rubric)
   { name: "attach-menu", path: "/", ready: ".mb-attach", act: click(".mb-attach") },
   { name: "queue-send", path: "/", ready: ".mb-when", act: show(".mb-when"), popover: ".mb-when" },
-  // the talk panel exists only once talk runs (needs a microphone): the tour shows its button
-  { name: "talk-button", path: `/i/${firstThread}`, ready: ".tk-btn" },
+  // hands-free talk is a bar modality; its live row needs a microphone, the tour shows the button
+  { name: "talk-button", path: `/i/${firstThread}`, ready: ".mb-mod[data-mod=talk]" },
   { name: "picker", path: "/m", ready: "[data-k-kind=modality]" },
   { name: "projects", path: "/m/projects", ready: "[data-k-kind=project]" },
   { name: "strip-closed", path: "/m/projects", ready: ".c-strip" },

@@ -3,11 +3,20 @@
   "name": "Columns",
   "version": "0.1.0",
   "contract": 1,
-  "doc": "Columns: named columns side by side, one per topic you keep in mind. Each column is a list of foldable panels (notes and windows into threads, Task Tinder, Projects, files, web pages); hold a panel's title and drag to reorder, swipe or use the arrows to change column. The agent arranges them through the bar.",
+  "doc": "Columns: named columns side by side, one per topic you keep in mind. Each column is a list of foldable panels (notes and windows into threads, Projects, files, web pages); hold a panel's title and drag to reorder, swipe or use the arrows to change column. A panel may take decisions (Dismiss, Comment, Accept at its foot, e.g. a board of suggested tasks): they are kept on the panel and reach the agent as Kanban cards. The agent arranges them through the bar.",
   "permissions": {
-    "read": ["columns", "thread", "file"],
-    "write": ["columns", "file"],
-    "network": []
+    "read": [
+      "columns",
+      "thread",
+      "file"
+    ],
+    "write": [
+      "columns",
+      "file"
+    ],
+    "network": [
+      "kanbanUrl"
+    ]
   },
   "modality": {
     "title": "Columns",
@@ -16,6 +25,8 @@
   },
   "web": {
     "entry": "web/columns.js",
-    "styles": ["web/columns.css"]
+    "styles": [
+      "web/columns.css"
+    ]
   }
 }

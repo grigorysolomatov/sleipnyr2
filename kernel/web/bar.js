@@ -18,7 +18,18 @@
 //                                     target on screen (mark the focused view)
 //   bar.el                            the bar element (extensions may add rows)
 //   bar.deliver({text, files, voice}) send to the focused target as if typed
-//                                     (a Blackboard window: its parent's bar)
+//                                     (a Blackboard window: its parent's bar);
+//                                     resolves to what the target's send()
+//                                     returned (chat views: {user, reply})
+//   bar.modality({ id, tip, icon, order?, onclick }) -> handle
+//       a plugin's own modality button among attach / keyboard / mic
+//       (icon = SVG markup; order: attach 10, keyboard 20, mic 40, default 30).
+//       handle.live({ stop, stopTip?, extra? }) switches the bar into that
+//       modality's live row (like recording: X left, level bars, a word and
+//       the elapsed time centred, extra buttons right; the other buttons
+//       hide; Esc or X calls stop); then handle.level(0..1), handle.word(text,
+//       tone) (tone: "here" pink, "agent" purple, else grey), handle.end()
+//       returns to the buttons.
 //
 // While more than one offered target is on screen (desktop: thread list and
 // thread side by side), the bar names its target with the "you are here"
@@ -107,25 +118,34 @@ export function createBar(ctx, app) {
     h("button", { class: "mb-btn", type: "button", "data-tip": "Pick photos or screenshots from the gallery", "aria-label": "Photos", onclick: () => choose(photos) }, "Photos"),
     h("button", { class: "mb-btn", type: "button", "data-tip": "Take a photo with the camera", "aria-label": "Camera", onclick: () => choose(camera) }, "Camera"),
     h("button", { class: "mb-btn", type: "button", "data-tip": "Pick any file", "aria-label": "Files", onclick: () => choose(picker) }, "Files"));
-  const attach = h("button", { class: "mb-btn mb-attach", type: "button", "data-tip": "Attach photos, a camera shot or files", "aria-label": "Attach photos, a camera shot or files", onclick: () => { pick.hidden = !pick.hidden; } }, "+");
+  const attach = h("button", { class: "mb-btn mb-attach", type: "button", "data-k-id": "bar-attach", "data-k-kind": "modality", "data-k-label": "Attach", "data-tip": "Attach photos, a camera shot or files", "aria-label": "Attach photos, a camera shot or files", onclick: () => { pick.hidden = !pick.hidden; } }, "+");
   const lvBars = [0, 1, 2, 3, 4].map(() => h("u"));
   const recTime = h("b", {}, "0:00"), recHint = h("small", {}, "recording");
   const recBar = h("div", { class: "mb-rec", hidden: true },
     h("button", { class: "mb-btn", type: "button", "data-tip": "Discard recording", "aria-label": "Discard recording", onclick: () => stopVoice(false) }, "✕"),
     h("span", { class: "mb-dot", "aria-hidden": "true" }), recTime, h("span", { class: "mb-lv", "aria-hidden": "true" }, lvBars), recHint);
   // each mode hides behind a button (text, voice); tooltips on hover / long-press
-  const mic = h("button", { class: "mb-btn mb-ic mb-mic", type: "button", "data-tip": "Voice message (Alt+V)", "aria-label": "Voice message", onclick: () => toggleVoice() }, svg(MIC));
-  const keys = h("button", { class: "mb-btn mb-ic mb-keys", type: "button", "data-tip": "Type a message (Alt+M)", "aria-label": "Type a message", onclick: () => openText() }, svg(KEYS));
+  const mic = h("button", { class: "mb-btn mb-ic mb-mic", type: "button", "data-k-id": "bar-mic", "data-k-kind": "modality", "data-k-label": "Voice message", "data-tip": "Voice message (Alt+V)", "aria-label": "Voice message", onclick: () => toggleVoice() }, svg(MIC));
+  const keys = h("button", { class: "mb-btn mb-ic mb-keys", type: "button", "data-k-id": "bar-keys", "data-k-kind": "modality", "data-k-label": "Type a message", "data-tip": "Type a message (Alt+M)", "aria-label": "Type a message", onclick: () => openText() }, svg(KEYS));
   const send = h("button", { class: "mb-btn mb-ic mb-send", type: "submit", "data-tip": "Send (Enter)", "aria-label": "Send" }, svg(SEND));
   const close = h("button", { class: "mb-btn mb-close", type: "button", "data-tip": "Close the text field", "aria-label": "Close the text field", onclick: () => closeText() }, "✕");
   const modes = h("div", { class: "mb-modes" }, attach, keys, mic);
+  // a plugin modality while it runs (hands-free talk): one live row, see modality()
+  const liveBars = [0, 1, 2, 3, 4].map(() => h("u"));
+  const liveTime = h("b", {}, "0:00"), liveWord = h("small", {}, "");
+  const liveStop = h("button", { class: "mb-btn", type: "button", "aria-label": "Stop", onclick: () => endLive(true) }, "✕");
+  const liveExtra = h("span", { class: "mb-live-x" });
+  const liveRow = h("div", { class: "mb-live", role: "status", "aria-live": "polite", hidden: true },
+    liveStop, h("span", { class: "mb-live-mid" }, h("span", { class: "mb-lv", "aria-hidden": "true" }, liveBars), liveWord, liveTime), liveExtra);
   // sending while the target is busy: queue it (default) or send it now; anchored at the send button
   const queueBtn = h("button", { class: "mb-btn mb-def", type: "button", "data-tip": "Runs after the current answer (Enter, Esc)", onclick: () => answer("queue") }, "Queue");
   const nowBtn = h("button", { class: "mb-btn", type: "button", "data-tip": "Adds it to the running answer if the agent can take it, else stops that answer and sends this one at once",
     onclick: () => answer("now") }, "Send now");
   const when = h("div", { class: "mb-when", role: "dialog", "aria-label": `${ctx.app?.agentName || "The agent"} is still busy`, hidden: true }, queueBtn, nowBtn);
+  // phone: the bar's target as a small line above the icons (the PC shows .mb-to)
+  const where = h("div", { class: "mb-where", hidden: true });
   const form = h("form", { class: "mb", onsubmit: e => { e.preventDefault(); sendNow(); } },
-    tray, note, pick, h("div", { class: "mb-row" }, to, modes, close, ta, recBar, send, when), picker, photos, camera);
+    tray, note, pick, where, h("div", { class: "mb-row" }, to, modes, close, ta, recBar, liveRow, send, when), picker, photos, camera);
 
   const say = (text, isError) => { note.hidden = !text; note.textContent = text || ""; note.classList.toggle("bad", !!isError); };
 
@@ -135,8 +155,10 @@ export function createBar(ctx, app) {
   function drawTarget() {
     const t = targets.get(current), many = shownTargets().length > 1;
     to.hidden = !t || !many;
+    where.hidden = !t || !ctx.feature?.("phoneTarget");
     if (t) {
       to.textContent = t.label?.() ?? t.id;
+      where.textContent = to.textContent; where.dataset.tip = `Talking to: ${to.textContent}`;
       to.dataset.tip = `Talking to: ${to.textContent}. Tap to switch`;
       to.setAttribute("aria-label", to.dataset.tip);
       ta.placeholder = t.placeholder?.() || `Message ${ctx.app?.agentName || "the agent"}`;
@@ -162,7 +184,7 @@ export function createBar(ctx, app) {
   async function deliver(input) {
     const t = aim();
     if (!t) throw new Error("nothing on screen takes input");
-    await t.send(input);
+    return t.send(input);
   }
 
   // "" = the target is idle (no choice), else what the user picked; nothing they send is ever lost
@@ -185,6 +207,41 @@ export function createBar(ctx, app) {
     e.preventDefault(); e.stopPropagation(); answer("queue");
   }, true);
   addEventListener("pointerdown", e => { if (b.asking && !when.contains(e.target)) answer("queue"); }, true);
+
+  // ------------------------------------------------------------ plugin modalities
+  let live = null; // {stop, t0, timer} while a plugin modality runs
+  function modality(m) {
+    if (!/^[a-z][a-z0-9-]{0,30}$/.test(m.id || "")) throw new Error("bad modality id");
+    const btn = h("button", { class: "mb-btn mb-ic mb-mod", type: "button", "data-mod": m.id, "data-tip": m.tip, "aria-label": m.tip,
+      "data-k-id": `bar-${m.id}`, "data-k-kind": "modality", "data-k-label": m.tip, onclick: () => m.onclick?.() }, svg(m.icon));
+    btn.style.order = String(m.order ?? 30);
+    modes.append(btn);
+    const handle = {
+      el: btn,
+      live({ stop, stopTip, extra = [] }) {
+        endLive(false);
+        live = { stop, t0: Date.now(), timer: setInterval(() => { liveTime.textContent = clock((Date.now() - live.t0) / 1000); }, 500) };
+        liveTime.textContent = "0:00"; liveWord.textContent = ""; delete liveRow.dataset.tone;
+        liveStop.dataset.tip = stopTip || "Stop"; liveStop.setAttribute("aria-label", liveStop.dataset.tip);
+        liveExtra.replaceChildren(...extra); handle.level(0);
+        pick.hidden = true; closeText();
+        form.classList.add("live"); liveRow.hidden = false;
+      },
+      level: v => { liveBars.forEach((u, i) => { u.style.transform = `scaleY(${Math.max(0.15, Math.min(1, v * SHAPE[i]))})`; }); },
+      word: (text, tone) => { liveWord.textContent = text || ""; if (tone) liveRow.dataset.tone = tone; else delete liveRow.dataset.tone; },
+      end: () => endLive(false),
+    };
+    return handle;
+  }
+  // stop = the person ended it (X / Esc): the plugin's stop runs, which calls end()
+  function endLive(byPerson) {
+    const l = live; if (!l) return;
+    if (byPerson) { try { l.stop(); } catch (e) { console.error(e); } }
+    if (live !== l) return; // stop() already ended it
+    clearInterval(l.timer); live = null;
+    form.classList.remove("live"); liveRow.hidden = true; liveExtra.replaceChildren();
+  }
+  addEventListener("keydown", e => { if (e.key === "Escape" && live && !b.asking) { e.preventDefault(); endLive(true); } });
 
   // ------------------------------------------------------------ attachments
   function addFiles(files) {
@@ -218,7 +275,7 @@ export function createBar(ctx, app) {
     setTimeout(() => form.classList.remove("sent"), 1000);
   }
 
-  function openText() { form.classList.add("typing"); ta.focus(); }
+  function openText() { if (live) return; form.classList.add("typing"); ta.focus(); }
   function closeText() { if (!ta.value.trim()) { form.classList.remove("typing"); ta.blur(); } }
   ta.addEventListener("blur", () => setTimeout(() => { if (!ta.value.trim() && document.activeElement !== ta) form.classList.remove("typing"); }, 150));
 
@@ -269,7 +326,7 @@ export function createBar(ctx, app) {
 
   // ------------------------------------------------------------ voice
   const SHAPE = [0.55, 0.8, 1, 0.8, 0.55];
-  async function toggleVoice() { b.recording ? stopVoice(true) : startVoice(); }
+  async function toggleVoice() { if (live) return; b.recording ? stopVoice(true) : startVoice(); }
 
   const clock = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
   let left = Infinity;
@@ -359,7 +416,7 @@ export function createBar(ctx, app) {
     else if (k === "m") { e.preventDefault(); openText(); }
   });
 
-  return { el: form, offer, focus, focused: () => current, say, refresh: drawTarget, deliver,
+  return { el: form, offer, focus, focused: () => current, say, refresh: drawTarget, deliver, modality,
     onChange: fn => { changes.add(fn); return () => changes.delete(fn); } };
 }
 

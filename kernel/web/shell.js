@@ -193,11 +193,36 @@ const OPEN_HINT = "Talk to the picker with the bar below: open a modality";
 function picker(ctx, box, mods, lv) {
   const list = el("ul", { class: "k-mods", role: "list" });
   box.append(el("header", { class: "k-bar" }, el("b", { class: "k-app" }, ctx.app.shortName)), list);
-  const draw = () => list.replaceChildren(...mods.map(p => el("li", {}, el("a", {
+  let recent = [], more = false, recentSoon = 0;
+  const when = t => { const d = new Date(Number(t)), now = new Date();
+    return d.toDateString() === now.toDateString() ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+      : d.toLocaleDateString([], { day: "numeric", month: "short" }); };
+  // Recent: the latest conversations across all views (pink = last open); 5 rows, More shows 15
+  const recentRows = () => !recent.length ? [] : [
+    el("li", { class: "k-mods-h" }, "Recent"),
+    ...recent.slice(0, more ? 15 : 5).map(r => el("li", {}, el("a", {
+      href: "#", class: r.here ? "k-rc here" : "k-rc", "data-k-id": r.id, "data-k-kind": "conversation", "data-tip": `Open ${r.name}`,
+      onclick: e => { e.preventDefault(); ctx.conversations?.open(r); } },
+      el("span", { class: "k-mod-t" }, el("b", {}, r.name), el("small", {}, `${r.role === "agent" ? ctx.app.agentName + ": " : ""}${r.text || "…"}`)),
+      el("time", {}, when(r.updated))))),
+    recent.length > 5 ? el("li", {}, el("button", { type: "button", class: "k-more", "data-k-id": "recent-more", "data-k-kind": "toggle",
+      "data-tip": more ? "Show fewer conversations" : "Show more conversations", onclick: () => { more = !more; draw(); } }, more ? "Fewer" : "More")) : null,
+    el("li", { class: "k-mods-h" }, "Modalities")];
+  const loadRecent = async () => {
+    if (!ctx.conversations || !ctx.feature("recent")) recent = [];
+    else try { recent = await ctx.conversations.recent(); } catch (e) { console.error(e); recent = []; }
+    if (ctx.levels.current() === PICKER) draw();
+  };
+  ctx.on("item", ({ item }) => {
+    if (item?.type !== "message" || ctx.levels.current() !== PICKER) return;
+    clearTimeout(recentSoon); recentSoon = setTimeout(loadRecent, 800);
+  });
+  const modRows = () => mods.map(p => el("li", {}, el("a", {
     href: lv.pathFor(p.id, ""), "data-id": p.id, "data-k-id": p.id, "data-k-kind": "modality", class: p.id === lv.from() ? "here" : null,
     "data-tip": `Open ${p.modality.title || p.name}`, onclick: e => { e.preventDefault(); ctx.levels.show(p.id); } },
     el("span", { class: "k-mod-ic", "aria-hidden": "true" }, svgEl(p.modality.icon)),
-    el("span", { class: "k-mod-t" }, el("b", {}, p.modality.title || p.name), p.modality.doc ? el("small", {}, p.modality.doc) : null)))));
+    el("span", { class: "k-mod-t" }, el("b", {}, p.modality.title || p.name), p.modality.doc ? el("small", {}, p.modality.doc) : null))));
+  const draw = () => list.replaceChildren(...[...recentRows(), ...modRows()].filter(Boolean));
   const describe = () => `[Sent from the Sleipnyr modality picker: the top level, a list of the ways to work with ${ctx.app.agentName} `
     + `("composed modalities"). On screen (id | title | what it is):\n${mods.map(p => `- ${p.id} | ${p.modality.title || p.name} | ${p.modality.doc || ""}`).join("\n")}\n`
     + `Came here from: ${lv.from() || "(start)"}. This chat is the picker's own history; the picker acts on your reply. `
@@ -217,7 +242,7 @@ function picker(ctx, box, mods, lv) {
     send: body => { if (!chat) throw new Error("no conversation here"); return chat.send(body); } });
   ctx.levels.onChange(id => {
     if (id !== PICKER) return;
-    draw();
+    draw(); loadRecent();
     chat = ctx.embed("modalities", box, { title: "Modality picker conversation", hint: OPEN_HINT, from: "modality picker", describe, run });
     ctx.bar.focus("modalities");
   });
@@ -240,6 +265,8 @@ async function boot() {
   const ctx = {
     app: { ...info.app, agentName: info.app.agentName || "Agent" }, user: info.user, plugins: info.plugins, api, upload, on,
     onReconnect, restyle,
+    // feature switches from the app config (app.features.<name> = false turns one off; default on)
+    feature: name => info.app.features?.[name] !== false,
     fileUrl: id => `/k/files/${encodeURIComponent(id)}`,
     address: id => `/i/${encodeURIComponent(id)}`,
     go: id => history.pushState({}, "", `/i/${encodeURIComponent(id)}`),

@@ -19,7 +19,7 @@ const BUILD = basename(realpathSync(ROOT));
 export interface Config {
   listen: { host: string; port: number };
   dataDir: string;
-  app: { name: string; shortName: string; home: string; agentName?: string }; // home = plugin shown at "/"; agentName = how the UI names the agent
+  app: { name: string; shortName: string; home: string; agentName?: string; features?: Record<string, boolean> }; // home = plugin shown at "/"; agentName = how the UI names the agent
   user: { id: string; name: string };
   plugins: Record<string, Record<string, unknown>>; // enabled plugins and their settings
   actions?: ActionsConfig; // which agents may call the plugins' declared actions (kernel/actions.ts)

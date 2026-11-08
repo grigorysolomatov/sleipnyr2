@@ -114,7 +114,9 @@ function viewActions(ctx, root, handle, views) {
   const framed = () => root.classList.contains("k-framed"); // a window inside a board: its parent page answers
   const level = () => ctx.levels?.current() || "";
   const levelBox = () => document.querySelector(`.k-level[data-level="${CSS.escape(level())}"]`) || root;
-  const find = id => [...levelBox().querySelectorAll(sel(id))].sort((a, b) => shown(b) - shown(a))[0] || null;
+  // the view on screen plus the shell's modality bar (its buttons carry data-k-id too)
+  const boxes = () => [levelBox(), root.querySelector(":scope > .mb")].filter(Boolean);
+  const find = id => boxes().flatMap(b => [...b.querySelectorAll(sel(id))]).sort((a, b) => shown(b) - shown(a))[0] || null;
   // a call naming a view this page does not show opens it first; one naming
   // none runs only where its targets are on screen (other pages stay quiet)
   const ids = a => [...(a.targets || a.ids || []), ...(a.target ? [a.target] : [])];
@@ -149,9 +151,9 @@ function viewActions(ctx, root, handle, views) {
   // ---- describe
   handle("view", "describe", async ({ view }) => {
     await open(view);
-    const box = levelBox(), seen = new Set(), rows = [];
+    const seen = new Set(), rows = [];
     const vh = innerHeight, vw = innerWidth, can = !!views.get(level())?.order;
-    for (const e of box.querySelectorAll("[data-k-id]")) {
+    for (const e of boxes().flatMap(b => [...b.querySelectorAll("[data-k-id]")])) {
       const id = e.dataset.kId; if (seen.has(id) || !shown(e)) continue; seen.add(id);
       const r = e.getBoundingClientRect(), on = r.bottom > 0 && r.top < vh && r.right > 0 && r.left < vw;
       const kind = e.dataset.kKind || "item", label = words(e.dataset.kLabel || e.textContent, 70);

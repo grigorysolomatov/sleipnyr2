@@ -44,6 +44,13 @@ body {
 .k-mod-ic svg { width: 1.5rem; height: 1.5rem; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .k-mod-t { display: flex; flex-direction: column; min-width: 0; }
 .k-mod-t small { color: var(--text-muted, #888); font-size: .8em; }
+/* picker: Recent conversations above the modalities */
+.k-mods-h { padding: .75rem .75rem .25rem; color: var(--text-muted, #888); font-size: .8em; }
+.k-rc .k-mod-t { flex: 1; }
+.k-rc small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.k-rc time { flex: none; align-self: flex-start; color: var(--text-muted, #888); font-size: .8em; }
+.k-more { background: none; border: 0; color: var(--text-muted, #888); font: inherit; font-size: .85em; padding: .5rem .75rem; cursor: pointer; }
+.k-more:hover { color: var(--text, #fff); }
 /* a modality's own list of items (kernel itemList, e.g. Columns boards): the thread list's look */
 .k-items {
   list-style: none; margin: 0; padding: .25rem var(--side); overflow-y: auto; flex: 1;
