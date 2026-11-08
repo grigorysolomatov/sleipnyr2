@@ -17,7 +17,7 @@
 //   allowlist kanban-proxy), keyEnv (default KANBAN_PROXY_KEY), decideBoard
 //   (default "default": the Kanban board when a panel names none), rules
 //   (lines added to every card; "{user}" = the user's name).
-import type { Item, Kernel, ServerPlugin } from "../../kernel/contract.ts";
+import { bad, type Item, type Kernel, type ServerPlugin } from "../../kernel/contract.ts";
 
 export type Verdict = "accept" | "dismiss" | "comment" | "reopen";
 export interface LogEntry { at: number; verdict: Verdict; comment?: string; card?: string; error?: string }
@@ -110,7 +110,6 @@ export function proxyCreate(k: Kernel) {
 }
 
 let decisions: Decisions | null = null;
-const bad = (e: unknown) => Response.json({ error: (e as Error).message || String(e) }, { status: (e as Refused).status || 400 });
 
 const plugin: ServerPlugin = {
   start(k) { decisions = new Decisions(k, proxyCreate(k)); },

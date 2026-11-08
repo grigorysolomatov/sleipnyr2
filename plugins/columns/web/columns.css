@@ -7,7 +7,7 @@
   --co-line: 1px solid var(--line);                  /* panel frame; the focused one is pink */
   --co-hl: 3px solid var(--accent-here);             /* the "look here" frame */
   --co-fresh: 2px solid var(--accent-attention);     /* the agent's "new" frame (@new) */
-  --co-shadow: 0 6px 24px rgba(0, 0, 0, .6);
+  --co-shadow: var(--shadow);
   --co-glide: 220ms;                                 /* panels easing into new places */
   --co-ease: cubic-bezier(.2, .7, .3, 1);
 }
@@ -32,19 +32,7 @@
 .co-empty { color: var(--text-muted); font-size: .85em; padding: .75rem; margin: 0; }
 
 /* the add menu: a small menu right under the + (locality) */
-.co-pick {
-  position: absolute; z-index: 30; min-width: 12rem; max-width: min(20rem, calc(100vw - 1rem)); padding: .25rem;
-  display: flex; flex-direction: column; background: var(--bg); border: 1px solid var(--text); border-radius: var(--radius);
-  box-shadow: var(--co-shadow);
-}
-.co-pi {
-  background: none; border: none; color: var(--text); text-align: left; padding: .55rem .7rem; border-radius: calc(var(--radius) - 2px);
-  cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.co-pi:hover { background: var(--surface); }
-.co-ph { margin: .35rem .7rem .1rem; color: var(--text-muted); font-size: .8em; border-top: 1px solid var(--line); padding-top: .4rem; }
-.co-pback { color: var(--text-muted); border-bottom: 1px solid var(--line); border-radius: 0; }
-.co-pscroll { display: flex; flex-direction: column; max-height: 50vh; overflow-y: auto; }
+/* look: .k-pop in kernel/web/base.css */
 
 /* the columns: side by side, sideways scrolling that snaps to a column (the swipe) */
 .co-cols {
@@ -76,7 +64,7 @@
 .co-panel.hl { outline: var(--co-hl); outline-offset: 3px; }
 .co-panel.fresh { outline: var(--co-fresh); outline-offset: 3px; }
 /* lifted: follows the finger, above the rest; the others glide aside */
-.co-panel.drag { z-index: 5; will-change: transform; box-shadow: 0 14px 40px rgba(0, 0, 0, .8); border-color: var(--text); }
+.co-panel.drag { z-index: 5; will-change: transform; box-shadow: var(--shadow-drag); border-color: var(--text); }
 .co-panel.glide { transition: transform var(--co-glide) var(--co-ease); }
 .co-pbar {
   flex: none; display: flex; align-items: center; min-height: 2.5rem; padding-left: .75rem; border-bottom: 1px solid var(--text);

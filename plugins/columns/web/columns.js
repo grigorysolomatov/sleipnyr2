@@ -34,6 +34,7 @@
 // overwrite each other. The column on screen is remembered per device.
 import { render } from "/web/text.js";
 import { itemList } from "/web/itemlist.js";
+import { darkFrame } from "/web/frame.js";
 
 const ME = "columns";
 const WIN = "columns-window"; // the bar's second target: the focused panel
@@ -121,7 +122,7 @@ export function mount(box, ctx) {
   const boards = itemList({ word: "board", agent: AG, href: it => `/m/${ME}/${encodeURIComponent(it.id)}`, open: it => ctx.levels.go(ME, it.id),
     title: it => it.data.title || "Untitled board", summary: it => boardSummary(it) });
   const note = h("p", { class: "co-note", "aria-live": "polite", hidden: true });
-  const pick = h("div", { class: "co-pick", hidden: true, role: "menu" });
+  const pick = h("div", { class: "co-pick k-pop", hidden: true, role: "menu" });
   const fileIn = h("input", { type: "file", hidden: true, onchange: () => addFile() });
   box.append(head, boards.el, strip, note, pick, fileIn);
   const say = (t, err = false) => { note.hidden = !t; note.textContent = t || ""; note.classList.toggle("err", err); };
@@ -169,13 +170,16 @@ export function mount(box, ctx) {
   let saving = null;
   function save(now = false) {
     clearTimeout(st.saveTimer);
-    if (!st.item) return Promise.resolve();
+    if (!st.item) return Promise.resolve(true);
+    // resolves true once saved, false when it failed (shown here; an agent run reports it too)
     const go = () => { st.saveTimer = 0; return (saving = (async () => {
       await saving?.catch(() => {});
       for (let i = 0; i < 5 && st.item; i++) {
-        try { const newer = await saveOnce(); if (!newer) return; takeRemote(newer); }
-        catch (e) { say(`Not saved: ${e.message}`, true); return; }
+        try { const newer = await saveOnce(); if (!newer) return true; takeRemote(newer); }
+        catch (e) { say(`Not saved: ${e.message}`, true); return false; }
       }
+      if (st.item) say("Not saved: the board kept changing elsewhere", true);
+      return false;
     })()); };
     if (now) return go();
     st.saveTimer = setTimeout(go, 400);
@@ -314,7 +318,7 @@ export function mount(box, ctx) {
     if (cur.collapsed || !src) { if (e.frame) { e.frame.remove(); e.frame = null; e.src = ""; } if (!src) e.content.replaceChildren(h("p", { class: "co-empty" }, "Nothing to show here.")); }
     else if (!e.frame || e.src !== src) {
       e.frame = h("iframe", { class: "co-frame", src, title: pTitle(cur), allow: "microphone; autoplay; clipboard-read; clipboard-write; fullscreen" });
-      e.frame.addEventListener("load", () => ctx.bar.refresh());
+      e.frame.addEventListener("load", () => { darkFrame(e.frame); ctx.bar.refresh(); });
       e.src = src; e.content.replaceChildren(e.frame);
     }
     return e;
@@ -654,12 +658,12 @@ export function mount(box, ctx) {
   // the add menu: right under its button (locality); panels go into the column in view
   function togglePick(on = pick.hidden) {
     if (!on) { pick.hidden = true; return; }
-    const item = (label, tip, fn) => h("button", { class: "co-pi", type: "button", role: "menuitem", "data-tip": tip, onclick: fn }, label);
+    const item = (label, tip, fn) => h("button", { class: "co-pi k-pop-i", type: "button", role: "menuitem", "data-tip": tip, onclick: fn }, label);
     const done = fn => () => { pick.hidden = true; try { fn(); } catch (e) { say(e.message, true); } };
     const here = cols()[atIdx()]?.title;
     pick.replaceChildren(
       item("New column", "A new column for another topic", done(() => { const t = prompt("Column name", ""); if (t !== null) addCol(t); })),
-      here ? h("p", { class: "co-ph" }, `Into “${here}”:`) : null,
+      here ? h("p", { class: "co-ph k-pop-h" }, `Into “${here}”:`) : null,
       item("Note", "A short Markdown note; tap its pen to write", done(() => { const p = addP("", "note", "", "Note"); toggleEdit(p.id); })),
       item("Thread…", "A chat thread: pick one", () => threadPick()),
       item("Thread list", "All threads, with their own conversation", done(() => addP("", "threads"))),
@@ -672,8 +676,8 @@ export function mount(box, ctx) {
   async function threadPick() {
     pick.replaceChildren(h("p", { class: "co-empty" }, "Loading threads…")); anchor();
     await loadThreads();
-    pick.replaceChildren(h("button", { class: "co-pi co-pback", type: "button", "data-tip": "Back to the menu", onclick: () => togglePick(true) }, "‹ Back"),
-      h("div", { class: "co-pscroll" }, st.threads.slice(0, 40).map(t => h("button", { class: "co-pi", type: "button", role: "menuitem", "data-tip": `Add “${t.data.title || t.id}”`,
+    pick.replaceChildren(h("button", { class: "co-pi k-pop-i co-pback k-pop-back", type: "button", "data-tip": "Back to the menu", onclick: () => togglePick(true) }, "‹ Back"),
+      h("div", { class: "co-pscroll k-pop-scroll" }, st.threads.slice(0, 40).map(t => h("button", { class: "co-pi k-pop-i", type: "button", role: "menuitem", "data-tip": `Add “${t.data.title || t.id}”`,
         onclick: () => { pick.hidden = true; try { addP("", "thread", t.id, t.data.title); } catch (e) { say(e.message, true); } } }, t.data.title || t.id))));
     anchor();
   }
@@ -686,6 +690,9 @@ export function mount(box, ctx) {
 
   // ------------------------------------------------------------ the agent: describe + @lines
   const NOTE_MAX = 4000;
+  // a long note is cut in the prompt, so the rules and actions always fit
+  const NOTE_SHOWN = 600;
+  const clip = (t, n) => (t.length > n ? `${t.slice(0, n)}… (${t.length - n} more characters; ask to see the full text)` : t);
   const describeList = () => {
     const line = it => `- ${it.id} | ${(it.data.title || "Untitled board").replace(/\s+/g, " ")} | ${boardSummary(it)} | updated ${new Date(Number(it.updated)).toISOString()}`;
     const shown = st.list.filter(it => !it.data.hidden), hidden = st.list.filter(it => it.data.hidden);
@@ -694,27 +701,26 @@ export function mount(box, ctx) {
       + `This chat is the board list's own history; the list acts on your reply. Reply with ONE short sentence (at most 12 words, shown on a single line), `
       + `then one line per action, exactly:\n@open <board id>\n@new [title]   (a new board, opened at once; default title = today)\n@rename <board id> <title>\n`
       + `@hide <board id>   (archive; nothing is deleted)\n@unhide <board id>\n`
-      + `The list runs these lines itself and does not show them: do not call any tool or API for them. Use only ids listed above. Never delete anything.]`;
+      + `The list runs these lines itself and does not show them. Do not call tools for these lines; to show, point at or play something on screen, use the sleipnyr2 view_* tools (view_describe first). Use only ids listed above. Never delete anything.]`;
   };
   const describe = async () => {
     if (!st.item) return describeList();
     await loadThreads();
     const at = cols()[atIdx()];
     const cs = cols().map((c, i) => `Column ${i + 1}: ${c.id} | ${c.title}${c.id === at?.id ? " | on screen" : ""}\n`
-      + (inCol(c.id).map((p, j) => `  ${j + 1}. ${p.id} | ${p.kind}${p.ref ? " " + p.ref : ""} | ${pTitle(p)}${p.collapsed ? " | folded" : ""}${data().highlight?.id === p.id ? " | highlighted" : ""}${p.fresh ? " | marked new" : ""}${p.decide ? ` | decision: ${p.decide.state}${p.decide.log?.length ? ` (${decideLine(p.decide)})` : ""}` : ""}`
-        + (p.kind === "note" ? `\n     text:\n${(p.text || "(empty)").slice(0, 1500).replace(/^/gm, "       ")}` : "")).join("\n") || "  (empty)")).join("\n");
+      + (inCol(c.id).map(p => `  - ${p.id} | ${p.kind}${p.ref ? " " + p.ref : ""} | ${pTitle(p)}${p.collapsed ? " | folded" : ""}${data().highlight?.id === p.id ? " | highlighted" : ""}${p.fresh ? " | marked new" : ""}${p.decide ? ` | decision: ${p.decide.state}${p.decide.log?.length ? ` (${decideLine(p.decide)})` : ""}` : ""}`
+        + (p.kind === "note" ? `\n     text:\n${clip(p.text || "(empty)", NOTE_SHOWN).replace(/^/gm, "       ")}` : "")).join("\n") || "  (empty)")).join("\n");
     const threads = st.threads.slice(0, 25).map(t => `- ${t.id} | ${t.data.title || ""}`).join("\n");
     const notes = data().agentNotes ? `[Agent notes, hidden from ${WHO}'s view, kept with the columns]\n${data().agentNotes}\n[End of agent notes]\n\n` : "";
     return `${notes}[Sent from the Sleipnyr Columns board "${(data().title || "").replace(/"/g, "'")}" (${st.item.id}): named columns side by side, one per topic ${WHO} keeps in mind, each a list of foldable panels `
       + `top to bottom (a phone shows one column at a time and swipes between them${matchMedia("(max-width: 760px)").matches ? "; the user is on a phone now" : ""}).\n`
-      + `${cs || "(no columns)"}\nRecent threads (id | title):\n${threads || "(none)"}\n`
       + `Columns are named by id, title or number (1 = leftmost). Actions, exactly:\n`
       + `@column <title>   (a new column at the right)\n@rename-column <column> <title>\n@move-column <column> <position>\n@remove-column <column>   (only an empty one)\n@show <column>   (swipe to it)\n`
       + `@note <column> <title>   (a new note at the bottom; its Markdown text on the next lines, then a line @end; keep it short)\n`
       + `@edit <panel id>   (replace a note's text: new text on the next lines, then @end)\n`
       + `@add <column> thread <thread id> | threads | tinder | projects [project id] | file <file id> [| title] | url <https address>\n`
       + `@move <panel id> <column> [position]   (position 1 = top; without it, the bottom)\n`
-      + `@collapse <panel id>\n@expand <panel id>\n@close <panel id>\n@title <panel id> <name>\n@focus <panel id>   (swipe to it and scroll it into view)\n`
+      + `@collapse <panel id>   (also @fold)\n@expand <panel id>   (also @unfold)\n@close <panel id>\n@title <panel id> <name>\n@focus <panel id>   (swipe to it and scroll it into view)\n`
       + `@highlight <panel or column id> [why]   (pink "look here" frame, one at a time)\n@unhighlight\n@new <panel id> [why]   (green "new" frame)\n@unnew <panel id>\n`
       + `@suggest <column> [board=<kanban board>] <title>   (a suggested task: a note with Dismiss, Comment and Accept at its foot; text on the next lines, then @end: what you would do, why it is worth it, rough effort, what ${WHO} must provide)\n`
       + `@decide <panel id> [kanban board]   (give any panel Dismiss, Comment and Accept)\n`
@@ -723,11 +729,14 @@ export function mount(box, ctx) {
       + `@rename-board <title>\n@back   (to the board list)\n`
       + `In notes, link files as [name](/k/files/<file id>) and pages as [name](https://...).\n`
       + `This chat is this board's own history; the board acts on your reply (other boards are not affected). Reply with ONE short sentence (at most 12 words, shown on a single line), `
-      + `then one line per action. The view runs these lines itself and does not show them: do not call any tool or API for them. Never delete anything.]`;
+      + `then one line per action. The view runs these lines itself and does not show them. Do not call tools for these lines; to show, point at or play something on screen, use the sleipnyr2 view_* tools (view_describe first). Never delete anything.\n`
+      + `${cs || "(no columns)"}\nRecent threads (id | title):\n${threads || "(none)"}]`;
   };
   const run = async (name, args, text = "") => {
     if (!st.item) return runList(name, args);
-    const r = await run1(name, args, text); if (st.item) await save(true); return r;
+    const r = await run1(name, args, text);
+    if (st.item && !(await save(true))) throw new Error(`not saved (${r})`);
+    return r;
   };
   async function runList(name, args) {
     const a = String(args || "").trim(), [first, ...rest] = a.split(/\s+/);
@@ -803,7 +812,7 @@ export function mount(box, ctx) {
     placeholder: () => (st.item ? "Ask the columns: add notes, move or fold panels" : "Ask the boards: open, start or rename one"),
     send: b => { if (!chat) throw new Error("no conversation here"); return chat.send(b); } });
   // the level's place: "" = the board list, else a board id
-  const embed = (view, title) => { chat = ctx.embed(view, box, { title, from: "columns", describe, run, scope: () => st.item?.id || "" }); };
+  const embed = (view, title) => { chat = ctx.embed(view, box, { title, from: "columns", describe, run, scope: () => st.item?.id || "", ownThread: true }); };
   let showing = 0;
   async function show(sub) {
     const mine = ++showing;

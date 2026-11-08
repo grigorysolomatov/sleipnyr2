@@ -168,7 +168,7 @@ export function mount(box, ctx) {
   });
   ctx.levels.onChange(level => {
     if (level !== ME) return;
-    chat = ctx.embed(ME, box, { title: "Task Tinder conversation", hint: "Ask for suggestions with the spark, or comment with the bar below",
+    chat = ctx.embed(ME, box, { title: "Task Tinder conversation",
       from: "task tinder", describe, run });
     ctx.bar.focus(ME);
     load();

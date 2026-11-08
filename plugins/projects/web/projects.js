@@ -56,7 +56,7 @@ export function mount(box, ctx) {
       + `\nThis chat is the Projects view's own history; the view acts on your reply. `
       + `Reply with ONE short sentence (at most 12 words, shown on a single line), then one line per action, exactly:\n`
       + `@open <project id>   (show that project's dashboard)\n@back   (back to the project list)\n`
-      + `The view runs these lines itself and does not show them: do not call any tool or API for them. Use only ids listed above. Never delete anything.]`;
+      + `The view runs these lines itself and does not show them. Do not call tools for these lines; to show, point at or play something on screen, use the sleipnyr2 view_* tools (view_describe first). Use only ids listed above. Never delete anything.]`;
   };
   const run = async (name, args) => {
     const id = String(args).trim().split(/\s+/)[0];
@@ -89,7 +89,7 @@ export function mount(box, ctx) {
     st.open = sub || "";
     if (st.open) st.last = st.open;
     draw();
-    chat = ctx.embed(ME, box, { title: "Projects conversation", hint: "Talk to Projects with the bar below: open a project", from: "projects", describe, run });
+    chat = ctx.embed(ME, box, { title: "Projects conversation", from: "projects", describe, run });
     ctx.bar.focus(ME);
   });
   draw();

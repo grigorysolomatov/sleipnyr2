@@ -119,7 +119,9 @@ with `Authorization: Bearer <key>`; its key and grants come from the config:
   generic view tools.
 - Tools: chat_blink, chat_glow, chat_highlight, chat_select, chat_scroll,
   chat_mark, chat_reply_open (plugin `chat`, look); view_describe,
-  view_mark, view_scroll_to, view_focus, view_animate, view_order (`view`).
+  view_mark, view_scroll_to, view_focus, view_animate, view_order,
+  view_media_play, view_media_pause, view_media_seek, view_open, view_back,
+  view_fold (`view`).
   Call view_describe first to get item ids.
 - A call reaches every open page; "running" means a page accepted it, not
   that the user saw it. Audit: `GET /k/actions`; stop all:

@@ -30,6 +30,7 @@
 // conversation sits in the embedded chat (ctx.embed), the bar talks to it, and
 // replies may carry "@name args" lines (see describe()).
 import { render } from "/web/text.js";
+import { darkFrame } from "/web/frame.js";
 
 const ME = "blackboards";
 // the board's conversation (view history thread) keeps the old view name, so
@@ -102,17 +103,6 @@ export function srcOf(w) {
   }
   return "";
 }
-// a raw file in a frame (image, text) gets the app's dark page and scrollbars
-function darkFrame(fr) {
-  try {
-    const d = fr.contentDocument; if (!d || d.getElementById("k-dark")) return;
-    const s = d.createElement("style"); s.id = "k-dark";
-    const tok = (n, f) => getComputedStyle(document.documentElement).getPropertyValue(n).trim() || f; // the app's theme
-    const bg = tok("--bg", "#000"), line = tok("--line", "#444");
-    s.textContent = `:root{color-scheme:dark;scrollbar-color:${line} ${bg};background:${bg}!important}body{background:${bg}!important;margin:0}body>img:only-child{display:block;max-width:100%;height:auto;margin:0 auto;background:${bg}!important}`;
-    (d.head || d.documentElement).appendChild(s);
-  } catch { /* other origin: leave it */ }
-}
 const fullOf = w => w.kind === "file" || w.kind === "url" ? srcOf(w) : srcOf(w).replace(/[?&]frame=1$/, "");
 
 export function mount(box, ctx) {
@@ -130,7 +120,7 @@ export function mount(box, ctx) {
   const memoBtn = icon(MEMO, `Agent notes (hidden from the board, read by ${AG} every turn)`, () => toggleMemo(), "ss-memob");
   const zoomEl = h("button", { class: "ss-zoom", type: "button", "data-tip": "Zoom; tap for 100 %", "aria-label": "Zoom to 100 %", onclick: () => zoomTo(1) });
   const memo = h("div", { class: "ss-memo", hidden: true, role: "dialog", "aria-label": "Agent notes" });
-  const pick = h("div", { class: "ss-pick", hidden: true, role: "menu" });
+  const pick = h("div", { class: "ss-pick k-pop", hidden: true, role: "menu" });
   const fileIn = h("input", { type: "file", hidden: true, onchange: () => addFile() });
   const head = h("header", { class: "ss-bar" }, back, titleEl, zoomEl, arrBtn, fitBtn, memoBtn, addBtn);
   const body = h("div", { class: "ss-body" });
@@ -222,14 +212,17 @@ export function mount(box, ctx) {
   let saving = null;
   function save(now = false) {
     clearTimeout(st.saveTimer);
-    if (!st.open) return Promise.resolve();
+    if (!st.open) return Promise.resolve(true);
+    // resolves true once saved, false when it failed (shown here; an agent run reports it too)
     const go = () => (saving = (async () => {
       await saving?.catch(() => {}); // one save at a time, each on the latest base
       for (let i = 0; i < 5 && st.open; i++) {
         const it = st.open;
-        try { const newer = await saveOnce(it); if (!newer) return; if (st.open?.id === newer.id) takeRemote(newer); }
-        catch (e) { say(`Not saved: ${e.message}`, true); return; }
+        try { const newer = await saveOnce(it); if (!newer) return true; if (st.open?.id === newer.id) takeRemote(newer); }
+        catch (e) { say(`Not saved: ${e.message}`, true); return false; }
       }
+      if (st.open) say("Not saved: the board kept changing elsewhere", true);
+      return false;
     })());
     if (now) return go();
     st.saveTimer = setTimeout(go, 400);
@@ -843,7 +836,7 @@ export function mount(box, ctx) {
   // the add-window picker: a small menu right under its button (locality)
   function togglePick(on = pick.hidden) {
     if (!on) { pick.hidden = true; return; }
-    const item = (label, tip, fn) => h("button", { class: "ss-pi", type: "button", role: "menuitem", "data-tip": tip, onclick: fn }, label);
+    const item = (label, tip, fn) => h("button", { class: "ss-pi k-pop-i", type: "button", role: "menuitem", "data-tip": tip, onclick: fn }, label);
     const done = fn => () => { pick.hidden = true; try { fn(); } catch (e) { say(e.message, true); } };
     pick.replaceChildren(
       item("Thread…", "A chat thread: pick one", () => threadPick()),
@@ -860,9 +853,9 @@ export function mount(box, ctx) {
   async function threadPick() {
     pick.replaceChildren(h("p", { class: "ss-empty" }, "Loading threads…")); anchor();
     await loadThreads();
-    const back2 = h("button", { class: "ss-pi ss-pback", type: "button", "data-tip": "Back to the window kinds", onclick: () => togglePick(true) }, "‹ Window kinds");
-    pick.replaceChildren(back2, h("div", { class: "ss-pscroll" }, st.threads.slice(0, 40).map(t =>
-      h("button", { class: "ss-pi", type: "button", role: "menuitem", "data-tip": `Add “${t.data.title || t.id}” as a window`,
+    const back2 = h("button", { class: "ss-pi k-pop-i ss-pback k-pop-back", type: "button", "data-tip": "Back to the window kinds", onclick: () => togglePick(true) }, "‹ Window kinds");
+    pick.replaceChildren(back2, h("div", { class: "ss-pscroll k-pop-scroll" }, st.threads.slice(0, 40).map(t =>
+      h("button", { class: "ss-pi k-pop-i", type: "button", role: "menuitem", "data-tip": `Add “${t.data.title || t.id}” as a window`,
         onclick: () => { pick.hidden = true; try { addWin("thread", t.id, t.data.title); } catch (e) { say(e.message, true); } } }, t.data.title || t.id))));
     anchor();
   }
@@ -918,42 +911,49 @@ export function mount(box, ctx) {
   }
 
   // ------------------------------------------------------------ the agent: describe + @lines
+  // a long note is cut in the prompt, so the rules and actions always fit
+  const clip = (t, n) => (t.length > n ? `${t.slice(0, n)}… (${t.length - n} more characters; ask to see the full text)` : t);
   const describe = async () => {
     await loadThreads();
     const threads = st.threads.slice(0, 25).map(t => `- ${t.id} | ${t.data.title || ""}`).join("\n");
-    const common = `This chat is the ${Cap(WORDS)} view's own history; the view acts on your reply. `
+    const commonOpen = `This chat is the ${Cap(WORDS)} view's own history; the view acts on your reply. `
       + `Reply with ONE short sentence (at most 12 words, shown on a single line), then one line per action. `
-      + `The view runs these lines itself and does not show them: do not call any tool or API for them. Never delete anything.]`;
+      + `The view runs these lines itself and does not show them. Do not call tools for these lines; to show, point at or play something on screen, use the sleipnyr2 view_* tools (view_describe first). Never delete anything.\n`;
+    const common = commonOpen.trimEnd() + "]";
     if (!st.open) {
       await loadList();
-      return `[Sent from the Sleipnyr ${Cap(WORDS)} modality: a list of ${WORDS} (overview boards with windows into threads, Task Tinder, `
-        + `projects, files). On screen (id | title | windows):\n${st.list.filter(s => !s.data.hidden).map(s => `- ${s.id} | ${s.data.title} | ${summary(s)}`).join("\n") || "(none)"}\n`
+      return `[Sent from the Sleipnyr ${Cap(WORDS)} modality: a list of ${WORDS} (overview boards with windows into threads, `
+        + `projects, files and other views). On screen (id | title | windows):\n${st.list.filter(s => !s.data.hidden).map(s => `- ${s.id} | ${s.data.title} | ${summary(s)}`).join("\n") || "(none)"}\n`
         + `Archived: \n${st.list.filter(s => s.data.hidden).map(s => `- ${s.id} | ${s.data.title}`).join("\n") || "(none)"}\n`
         + `Actions, exactly:\n@open <${WORD} id>\n@new <title>   (makes and opens a ${WORD})\n@rename <${WORD} id> <title>\n@hide <${WORD} id>   (archive)\n@unhide <${WORD} id>\n` + common;
     }
     const v = viewOf(), r = board.getBoundingClientRect();
     const hl = sess().highlight?.id;
     const ws = wins().map(w => `- ${w.id} | ${w.kind}${w.ref ? " " + w.ref : ""} | ${winTitle(w)} | x ${w.x} y ${w.y} w ${w.w} h ${w.h}${w.collapsed ? " | folded" : ""}${w.id === hl ? " | highlighted" : ""}${w.fresh ? " | marked new" : ""}`
-      + (w.kind === "note" ? `\n  text:\n${(w.text || "(empty)").slice(0, 2000).replace(/^/gm, "    ")}` : "")).join("\n");
+      + (w.kind === "note" ? `\n  text:\n${clip(w.text || "(empty)", 600).replace(/^/gm, "    ")}` : "")).join("\n");
     const notes = [sess().agentNotes ? `Notes for this ${WORD} (${WHO}'s agreed conventions; follow them):\n${sess().agentNotes}` : "",
       ...wins().filter(w => w.agentNotes).map(w => `Notes for window ${w.id}:\n${w.agentNotes}`)].filter(Boolean).join("\n\n");
     return `${notes ? `[Agent notes, hidden from ${WHO}'s board view, kept with the ${WORD}]\n${notes}\n[End of agent notes]\n\n` : ""}[Sent from the Sleipnyr ${Cap(WORDS)} modality: ${WORD} ${st.open.id} "${sess().title}", an infinite board ${WHO} pans and zooms (phone and desktop alike). `
-      + `Windows on it (id | kind ref | title | position and size in board px):\n${ws || "(none)"}\n`
-      + `Zones (title | x y w h | windows):\n${zones().map(z => `- ${z.title} | ${z.x} ${z.y} ${z.w} ${z.h} | ${wins().filter(w => zoneOf(w) === z).map(w => w.id).join(" ") || "-"}`).join("\n") || "(none)"}\n`
-      + `Visible area now: x ${Math.round(-v.x / v.z)} to ${Math.round((r.width - v.x) / v.z)}, y ${Math.round(-v.y / v.z)} to ${Math.round((r.height - v.y) / v.z)} (zoom ${Math.round(v.z * 100)} %)`
-      + `${st.narrow ? "; on a phone" : ""}.\nRecent threads (id | title):\n${threads || "(none)"}\n`
       + `Actions, exactly:\n@add thread <thread id>\n@add threads   (the thread list)\n@add tinder\n@add projects [project id]\n@add file <file id> [| title]\n@add url <https address>\n`
       + `@move <window id> <x> <y> [<w> <h>]   (snaps to a 24 px grid)\n@arrange [zone title]   (tidy grid, no overlap; with zones each zone on its own, or just the named one)\n`
       + `@zone <title> <x> <y> <w> <h>   (a labelled frame behind windows; the same title moves/resizes it; a window belongs to the zone holding its centre)\n@unzone <title>   (remove the frame, windows stay)\n`
-      + `@collapse <window id>\n@expand <window id>\n@close <window id>\n@focus <window id>   (bring forward, pan to it)\n`
+      + `@collapse <window id>   (also @fold)\n@expand <window id>   (also @unfold)\n@close <window id>\n@focus <window id>   (bring forward, pan to it)\n`
       + `@fit   (show all windows)\n@rename <${WORD} title>\n@back   (to the ${WORD} list)\n`
       + `@note <title>   (a new note window; its Markdown text follows on the next lines, then a line @end; keep it to one screen)\n`
       + `@edit <window id>   (replace a note's text: the new text on the next lines, then @end)\n`
       + `@title <window id> <name>   (rename a window)\n@highlight <window id> [why]   (pink "look here" frame, one at a time; a tap clears it)\n@unhighlight\n@new <window id> [why]   (green "new" frame, any number of windows; a tap/unfold clears it)\n@unnew <window id>\n`
       + `@memo <text>   (append to the hidden notes for this ${WORD}, shown to you at the top of every prompt: use for conventions ${WHO} agrees)\n@memo <window id> <text>   (append to that window's hidden notes)\n@memo-clear [window id]   (erase the ${WORD}'s notes, or that window's)\n`
-      + `In notes, link files as [name](/k/files/<file id>) and pages as [name](https://...).\n` + common;
+      + `In notes, link files as [name](/k/files/<file id>) and pages as [name](https://...).\n` + commonOpen
+      + `Windows on it (id | kind ref | title | position and size in board px):\n${ws || "(none)"}\n`
+      + `Zones (title | x y w h | windows):\n${zones().map(z => `- ${z.title} | ${z.x} ${z.y} ${z.w} ${z.h} | ${wins().filter(w => zoneOf(w) === z).map(w => w.id).join(" ") || "-"}`).join("\n") || "(none)"}\n`
+      + `Visible area now: x ${Math.round(-v.x / v.z)} to ${Math.round((r.width - v.x) / v.z)}, y ${Math.round(-v.y / v.z)} to ${Math.round((r.height - v.y) / v.z)} (zoom ${Math.round(v.z * 100)} %)`
+      + `${st.narrow ? "; on a phone" : ""}.\nRecent threads (id | title):\n${threads || "(none)"}]`;
   };
-  const run = async (name, args, text = "") => { const r = await run1(name, args, text); if (st.open) await save(true); return r; };
+  const run = async (name, args, text = "") => {
+    const r = await run1(name, args, text);
+    if (st.open && !(await save(true))) throw new Error(`not saved (${r})`);
+    return r;
+  };
   const run1 = async (name, args, text = "") => {
     const a = String(args || "").trim(), [first, ...rest] = a.split(/\s+/);
     if (!st.open) {
@@ -1006,17 +1006,27 @@ export function mount(box, ctx) {
     placeholder: () => (st.open ? `Ask the ${WORD}: add, move or fold windows, write notes` : `Ask ${Cap(WORDS)}: open or start a ${WORD}`),
     send: b => { if (!chat) throw new Error("no conversation here"); return chat.send(b); } });
 
+  // never waits on the network before drawing what it can (a stalled phone
+  // connection must not leave the old view up while the URL changed)
+  let showing = 0;
   async function show(sub) {
+    const mine = ++showing;
     pick.hidden = true; say("");
-    if (!st.list.length) await loadList();
-    if (!sub) { st.open = null; st.here = ""; drawList(); chat?.retry?.(); return; }
+    if (!sub) {
+      st.open = null; st.here = "";
+      if (!st.list.length) { await loadList(); if (mine !== showing) return; }
+      drawList(); chat?.retry?.(); return;
+    }
+    if (!st.list.length) loadList().catch(() => {});
     let it = st.list.find(s => s.id === sub);
     if (!it) try { it = await ctx.api(`/k/items/${encodeURIComponent(sub)}`); } catch { it = null; }
+    if (mine !== showing) return;
     if (!it || it.type !== "session") { say(`No such ${WORD}.`, true); ctx.levels.go(ME, ""); return; }
     if (st.open?.id !== it.id) { st.els.forEach(e => e.el.remove()); st.els.clear(); }
     st.open = { ...it, data: { windows: [], view: { x: 0, y: 0, z: 1 }, ...it.data } }; st.last = it.id; setBase(it);
-    await loadThreads();
     drawBoard(); firstView();
+    // thread titles for thread windows arrive behind the drawn board
+    loadThreads().then(() => { if (mine === showing && st.open?.id === it.id) drawBoard(); }).catch(() => {});
     chat?.retry?.(); // replies that arrived while this session was not on screen
   }
   // the kernel's generic view actions (kernel/web/actions.js): focus pans to
@@ -1042,7 +1052,7 @@ export function mount(box, ctx) {
   ctx.levels.onChange((level, sub) => {
     if (level !== ME) return;
     show(sub || "");
-    chat = ctx.embed(VIEW, box, { title: `${Cap(WORDS)} conversation`, hint: `Talk to the ${WORD} with the bar below: add, move or fold windows, write notes`,
+    chat = ctx.embed(VIEW, box, { title: `${Cap(WORDS)} conversation`,
       from: "blackboards", describe, run, scope: () => st.open?.id || "" });
     ctx.bar.focus(hereWin() ? WIN : ME);
   });

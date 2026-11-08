@@ -4,7 +4,9 @@ An audit of the things a user does by hand in each view, and whether an agent
 can do the same through the actions system: MCP at `POST /k/mcp`, audited in
 `GET /k/actions`, ended by the stop control. Grants are `view` and `chat` at
 the "look" or "act" level. The other route is reply `@lines` in a view's own
-conversation (HCP). Those run only when the user sends from that view.
+conversation (HCP). Those run on the page that sent the turn; a reply to a
+notice (a turn started by a local service) runs when that view is next on
+screen. Failed or unrun lines are reported to the agent in its next turn.
 
 Tool names below use the MCP form, `<plugin>_<name>`, so `view_media_play`
 is the action `view/media_play`.
@@ -89,6 +91,7 @@ own conversation; no = not yet.
 - Open a board from the board list: yes (view_open); back to the list: yes (view_back)
 - Archived boards section (board list): yes (view_fold / view_open target `archived`)
 - Rename board/column, add/close panels, notes: HCP
+- Suggested tasks with Dismiss / Comment / Accept: HCP @suggest, @decide
 
 ### Blackboards
 - Fold / unfold a window: yes (view_fold, HCP @collapse/@expand)
@@ -106,7 +109,7 @@ own conversation; no = not yet.
 ### Projects
 - Open a project: yes (view_open); back: yes (view_back)
 
-### Theme, Settings, Balance
+### Theme, Balance
 - Change a token: HCP in Theme (@set/@reset)
 - Feature switches: no (server settings API, not a page action)
 - Balance rows: read only; view_describe and view_mark cover them

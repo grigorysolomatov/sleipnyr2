@@ -29,7 +29,7 @@
 //   accepted card; "{user}" = the user's name], sources (extra places the agent
 //   should look for ideas, e.g. a notes folder; one phrase), apiUrl (how the agent
 //   reaches this app, default http://127.0.0.1:8180).
-import type { Item, Kernel, ServerPlugin } from "../../kernel/contract.ts";
+import { bad, type Item, type Kernel, type ServerPlugin } from "../../kernel/contract.ts";
 
 export interface Tier { model?: string; provider?: string; label: string; doc?: string }
 /** Used when the config names no tiers: the card runs on the assignee profile's own model. */
@@ -165,7 +165,6 @@ export function proxyCreate(k: Kernel) {
 }
 
 let tinder: Tinder | null = null;
-const bad = (e: unknown) => Response.json({ error: (e as Error).message || String(e) }, { status: (e as Refused).status || 400 });
 
 const plugin: ServerPlugin = {
   start(k) { tinder = new Tinder(k, proxyCreate(k)); },

@@ -16,8 +16,8 @@
 .pp-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .pp-list {
   list-style: none; margin: 0; padding: .25rem var(--side); overflow-y: auto;
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
-  mask-image: linear-gradient(to bottom, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+  -webkit-mask-image: var(--fade-mask);
+  mask-image: var(--fade-mask);
 }
 .pp-list a {
   display: flex; gap: .5rem; align-items: baseline; padding: .7rem .75rem; color: var(--text); text-decoration: none;

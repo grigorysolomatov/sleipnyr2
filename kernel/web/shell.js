@@ -189,7 +189,6 @@ function createLevels(ctx, view, home, mods) {
 
 // The picker: one row per composed modality (symbol, title, what it is), its
 // own conversation in the embedded chat underneath, and the bar talks to it.
-const OPEN_HINT = "Talk to the picker with the bar below: open a modality";
 function picker(ctx, box, mods, lv) {
   const list = el("ul", { class: "k-mods", role: "list" });
   box.append(el("header", { class: "k-bar" }, el("b", { class: "k-app" }, ctx.app.shortName)), list);
@@ -227,7 +226,7 @@ function picker(ctx, box, mods, lv) {
     + `("composed modalities"). On screen (id | title | what it is):\n${mods.map(p => `- ${p.id} | ${p.modality.title || p.name} | ${p.modality.doc || ""}`).join("\n")}\n`
     + `Came here from: ${lv.from() || "(start)"}. This chat is the picker's own history; the picker acts on your reply. `
     + `Reply with ONE short sentence (at most 12 words, shown on a single line), then one line per action, exactly:\n`
-    + `@open <modality id>   (show that modality)\nThe picker runs these lines itself and does not show them: do not call any tool or API for them. `
+    + `@open <modality id>   (show that modality)\nThe picker runs these lines itself and does not show them. Do not call tools for these lines; to show, point at or play something on screen, use the sleipnyr2 view_* tools (view_describe first). `
     + `Use only ids listed above. Never delete anything.]`;
   const run = async (name, args) => {
     const id = String(args).trim().split(/\s+/)[0];
@@ -243,7 +242,7 @@ function picker(ctx, box, mods, lv) {
   ctx.levels.onChange(id => {
     if (id !== PICKER) return;
     draw(); loadRecent();
-    chat = ctx.embed("modalities", box, { title: "Modality picker conversation", hint: OPEN_HINT, from: "modality picker", describe, run });
+    chat = ctx.embed("modalities", box, { title: "Modality picker conversation", from: "modality picker", describe, run });
     ctx.bar.focus("modalities");
   });
 }

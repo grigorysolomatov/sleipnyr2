@@ -5,7 +5,7 @@
 :root {
   --ss-dot: color-mix(in srgb, var(--text) 16%, transparent); /* board grid dots */
   --ss-win-line: 1px solid var(--line);                        /* window frame; the focused one is pink */
-  --ss-shadow: 0 6px 24px rgba(0, 0, 0, .6);
+  --ss-shadow: var(--shadow);
   --ss-hl: 3px solid var(--accent-here);                       /* the "look here" frame */
   --ss-fresh: 2px solid var(--accent-attention);               /* the agent's "new" frame (@new) */
   --ss-zone-line: 3px dashed color-mix(in srgb, var(--text) 30%, transparent); /* zone frame (board px: stays visible zoomed out) */
@@ -54,18 +54,7 @@
 .ss-arch summary { padding: .6rem .75rem; color: var(--text-muted); font-size: .85em; cursor: pointer; }
 
 /* the add-window picker: a small menu right under the + (locality) */
-.ss-pick {
-  position: absolute; z-index: 30; min-width: 12rem; max-width: min(20rem, calc(100vw - 1rem)); padding: .25rem;
-  display: flex; flex-direction: column; background: var(--bg); border: 1px solid var(--text); border-radius: var(--radius);
-  box-shadow: var(--ss-shadow);
-}
-.ss-pi {
-  background: none; border: none; color: var(--text); text-align: left; padding: .55rem .7rem; border-radius: calc(var(--radius) - 2px);
-  cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.ss-pi:hover { background: var(--surface); }
-.ss-pback { color: var(--text-muted); border-bottom: 1px solid var(--line); border-radius: 0; }
-.ss-pscroll { display: flex; flex-direction: column; max-height: 50vh; overflow-y: auto; }
+/* look: .k-pop in kernel/web/base.css */
 
 /* the board: an unlimited plane under a dot grid; the plane moves (pan) and scales (zoom) */
 .ss-board {
@@ -102,7 +91,7 @@
 }
 .ss-win.here { border-color: var(--accent-here); }
 /* dragged: follows the pointer by transform, lifted; dropped: glides into its grid slot */
-.ss-win.drag { will-change: transform; box-shadow: 0 14px 40px rgba(0, 0, 0, .8); }
+.ss-win.drag { will-change: transform; box-shadow: var(--shadow-drag); }
 .ss-win.glide { transition: transform var(--ss-glide) var(--ss-ease), width var(--ss-glide) var(--ss-ease), height var(--ss-glide) var(--ss-ease); }
 .ss-ghost { position: absolute; border: 1px dashed var(--text-muted); border-radius: var(--radius); pointer-events: none; }
 /* "look here" (agent highlight): a pink frame outside the window, one at a time */

@@ -18,6 +18,8 @@ if (shots) await Bun.$`mkdir -p ${shots}`;
 type State = { name: string; path: string; ready: string; act?: string; popover?: string; desktopOnly?: boolean };
 const firstThread = ((await (await fetch(`${url}/p/chat/threads`)).json()) as { id: string }[])[0]?.id || "";
 const board = ((await (await fetch(`${url}/k/items?type=session&limit=20`)).json()) as { id: string }[])[0]?.id || "";
+// /m/columns is the board list since multi-board; the tour opens the first board
+const colBoard = ((await (await fetch(`${url}/k/items?type=columns&limit=20`)).json()) as { id: string }[])[0]?.id || "";
 const show = (s: string) => `(e => { if (!e) return false; e.hidden = false; return true; })(document.querySelector(${JSON.stringify(s)}))`;
 const click = (s: string) => `(e => { if (!e) return false; e.click(); return true; })([...document.querySelectorAll(${JSON.stringify(s)})].find(x => x.getClientRects().length))`;
 
@@ -35,8 +37,9 @@ const STATES: State[] = [
   { name: "strip-closed", path: "/m/projects", ready: ".c-strip" },
   { name: "strip-open", path: "/m/projects", ready: ".c-strip-line", act: click(".c-strip-line") },
   { name: "tinder", path: "/m/tinder", ready: ".tt-card, .tt-empty, [class^=tt-]" },
-  { name: "columns", path: "/m/columns", ready: ".co-panel" },
-  { name: "columns-add-menu", path: "/m/columns", ready: ".co-add", act: click(".co-add"), popover: ".co-pick" },
+  { name: "columns-list", path: "/m/columns", ready: "[data-k-kind]" },
+  { name: "columns", path: `/m/columns/${colBoard}`, ready: ".co-panel" },
+  { name: "columns-add-menu", path: `/m/columns/${colBoard}`, ready: ".co-add", act: click(".co-add"), popover: ".co-pick" },
   { name: "blackboards", path: "/m/blackboards", ready: "[data-k-kind]" },
   { name: "blackboard", path: `/m/blackboards/${board}`, ready: ".ss-win" },
   { name: "theme", path: "/m/theme", ready: ".tm-row" },

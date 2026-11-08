@@ -29,18 +29,9 @@
 }
 .c-app { flex: 1; font-weight: 600; }
 .c-title { cursor: pointer; flex: 1; margin: 0; font-size: 1rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.c-btn {
-  background: none; border: 1px solid var(--line); border-radius: var(--radius); min-width: 2.5rem; min-height: 2.5rem;
-  padding: 0 .6rem; cursor: pointer; line-height: 1;
-}
-.c-btn:hover { border-color: var(--text-muted); }
 .c-back { border: none; font-size: 1.6rem; }
 /* up to the modality picker, on the thread list header: the same symbol as back */
 .c-up { border: none; font-size: 1.6rem; }
-/* header icons (extensions' thread-bar buttons): stroked symbols like the bar's */
-.c-ic { display: inline-grid; place-items: center; padding: 0; width: 2.75rem; border: none; }
-.c-ic:hover { color: var(--text-muted); }
-.c-ic svg { width: 1.35rem; height: 1.35rem; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 
 /* ---------------------------------------------------------------- thread list */
 
@@ -88,7 +79,7 @@ body:has(.c-shell:not(.thread-open) .c-strip:not([hidden])) { --bar-line: var(--
 .c-strip-head .c-btn:hover { color: var(--text-muted); }
 .c-tm-btn.alt { color: var(--accent-here); /* another thread than the view's own is shown */ }
 .c-tm {
-  position: absolute; z-index: 20; left: calc(4px + var(--side)); display: flex; flex-direction: column; overflow-y: auto; width: min(22rem, calc(100% - 8px - 2 * var(--side)));
+  position: absolute; z-index: 20; right: calc(4px + var(--side)); display: flex; flex-direction: column; overflow-y: auto; width: min(22rem, calc(100% - 8px - 2 * var(--side)));
   padding: .25rem; background: var(--bg); border: 1px solid var(--text); border-radius: var(--radius);
 }
 .c-tm[hidden] { display: none; }

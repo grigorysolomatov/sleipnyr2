@@ -24,7 +24,7 @@
 //   (default http://127.0.0.1:9122, key in $AGENT_FILES_KEY). Reply lines
 //   "MEDIA:/abs/path" are fetched from it, saved as files of the reply and
 //   removed from its text.
-import { ITEM_TOPIC } from "../../kernel/contract.ts";
+import { bad, ITEM_TOPIC } from "../../kernel/contract.ts";
 import type {
   AgentService, AgentTurn, AttachedFile, FileData, Item, Kernel, ServerPlugin, TranscribeService,
 } from "../../kernel/contract.ts";
@@ -38,6 +38,7 @@ export interface CallNote { id: string; text: string }
 export interface Message {
   thread: string; role: "user" | "agent"; text: string; files: string[];
   voice?: string; transcript?: string; reply?: string; from?: string; context?: string; actions?: Action[]; calls?: CallNote[];
+  actionsDone?: string[]; // what the view reported for each action ("ok: ..." / "failed: ..."; ["running"] = claimed)
   status: "queued" | "transcribing" | "working" | "done" | "error" | "stopped" | "cancelled"; error?: string;
   // stopped (agent reply): stopped by the user; skipped = it never ran. cancelled (user message): never sent.
   // steered: the user message went into the turn that was already running (its reply stays empty, hidden).
@@ -221,6 +222,19 @@ class Chat {
    * one with the chat_mark / chat_scroll actions ("that voice message").
    * Not in a view's history thread (the list addresses threads, not messages).
    */
+  /** View threads: how the previous reply's @lines went, when any failed or never ran (else ""),
+   *  so the agent does not assume a change happened. */
+  private actionsNote(t: Item<Thread>, userId: string, replyId: string): string {
+    if (!t.data.view) return "";
+    const prev = this.messages(t.id).filter(m => m.id !== replyId && m.id !== userId && m.data.role === "agent" && m.data.status === "done").pop();
+    if (!prev?.data.actions?.length) return "";
+    const done = prev.data.actionsDone;
+    if (!done || done[0] === "running")
+      return `[Your previous reply's actions did not run (the view was not on screen): ${prev.data.actions.map(a => `@${a.name} ${a.args}`.trim()).join("; ").slice(0, 400)}. Send them again if still wanted.]\n\n`;
+    if (!done.some(d => d.startsWith("failed"))) return "";
+    return `[Your previous reply's actions: ${done.join("; ").slice(0, 600)}]\n\n`;
+  }
+
   private idsNote(t: Item<Thread>, userId: string, replyId: string): string {
     if (t.data.view) return "";
     const ms = this.messages(t.id).filter(m => m.id !== replyId && m.id !== userId).slice(-IDS_SHOWN);
@@ -480,6 +494,7 @@ class Chat {
     if (user.data.context) text += `\n\n${user.data.context}`;
 
     const thread = this.k.items.get<Thread>(threadId)!;
+    text = this.actionsNote(thread, userId, replyId) + text;
     a.stage = "working";
     if (resumed) a.state = { ...(thread.data.state || {}) };
     this.k.items.update(replyId, { status: "working" });
@@ -584,7 +599,6 @@ class Chat {
 let chat: Chat | null = null;
 
 class HttpError extends Error { constructor(readonly status: number, message: string) { super(message); } }
-const bad = (e: unknown, status = 400) => Response.json({ error: (e as Error).message || String(e) }, { status: (e as HttpError).status || status });
 
 const plugin: ServerPlugin = {
   start(k) { chat = new Chat(k); chat.watchCalls(); chat.resumeAll(); },

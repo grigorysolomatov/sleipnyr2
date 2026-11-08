@@ -15,7 +15,7 @@ import { render } from "/web/text.js";
 const API = "/p/chat";
 const IMAGE = /^image\//;
 const DOWN = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
-const LEFT = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>';
+const LIST = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01"/></svg>';
 const UP = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>';
 const FULL = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-8 8M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>';
 const STOP = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6.5" y="6.5" width="11" height="11" rx="1.5"/></svg>';
@@ -171,19 +171,19 @@ export async function mount(root, ctx) {
     "data-tip": "The last answer here. Tap for the whole conversation", onclick: () => { if (!dragged()) openStrip(true); } });
   const stripMsgs = h("div", { class: "c-strip-msgs" });
   const stripLog = h("div", { class: "c-strip-log", role: "log", "aria-live": "polite" }, stripMsgs);
-  const fold = h("button", { class: "c-btn c-ic c-strip-fold", type: "button", "aria-expanded": "false", "data-tip": "Expand", "aria-label": "Expand",
+  const fold = h("button", { class: "c-btn c-ic c-strip-fold", type: "button", "aria-expanded": "false", "data-tip": "Unfold", "aria-label": "Unfold",
     onclick: () => openStrip(!strip.classList.contains("open")) }, svg(DOWN));
-  // threads menu (left arrow = up one level): this view's conversation, its earlier ones, recent threads
-  const tmBtn = h("button", { class: "c-btn c-ic c-tm-btn", type: "button", "aria-haspopup": "menu", "data-tip": "Threads for this view", "aria-label": "Threads for this view",
-    onclick: () => (tm.hidden ? openMenu() : closeMenu()) }, svg(LEFT));
+  // threads menu (list icon, right side): this view's conversation, its earlier ones, recent threads
+  const tmBtn = h("button", { class: "c-btn c-ic c-tm-btn", type: "button", "aria-haspopup": "menu", "data-tip": "Threads", "aria-label": "Threads",
+    onclick: () => (tm.hidden ? openMenu() : closeMenu()) }, svg(LIST));
   const tm = h("div", { class: "c-tm", role: "menu", "aria-label": "Threads for this view", hidden: true });
   const stripTools = h("span", { class: "c-strip-tools" }); // moves between the line and the header
   const stripName = h("b", {}, "Thread list conversation");
-  const stripHead = h("div", { class: "c-strip-head", "data-tip": "Embedded chat: drag to resize, tap to fold" },
-    h("span", { class: "c-strip-grip", "aria-hidden": "true" }), tmBtn,
-    stripName,
+  const stripHead = h("div", { class: "c-strip-head", "data-tip": "Embedded chat: drag to resize, tap to fold or unfold" },
+    h("span", { class: "c-strip-grip", "aria-hidden": "true" }), fold,
+    stripName, tmBtn,
     h("button", { class: "c-btn c-ic", type: "button", "data-tip": "Open as a full thread", "aria-label": "Open as a full thread",
-      onclick: () => { if (st.hist) openThread(st.hist.id, true); } }, svg(FULL)), fold);
+      onclick: () => { if (st.hist) openThread(st.hist.id, true); } }, svg(FULL)));
   // stop: only while a turn of this conversation runs or waits (the running one stops first)
   const stripStop = h("button", { class: "c-btn c-ic c-stop", type: "button", hidden: true, "data-tip": `Stop ${agentName}`, "aria-label": `Stop ${agentName}`,
     onclick: () => { if (st.hist) stopTurn(st.hist.id); } }, svg(STOP));
@@ -662,7 +662,6 @@ export async function mount(root, ctx) {
     const shown = all.filter(m => !(hearing && m.data.role === "agent" && m.data.status === "queued" && !st.histLive.get(m.id)?.progress));
     const olds = new Map([...stripMsgs.querySelectorAll(".c-msg")].map(e => [e.dataset.id, e]));
     stripMsgs.replaceChildren(...shown.map(m => { const el = messageEl(m); el.removeAttribute("id"); keepPlayers(olds.get(m.id), el); return el; }));
-    if (!st.histMsgs.size) stripMsgs.append(h("p", { class: "c-hello" }, "Nothing asked yet."));
     if (end) stripLog.scrollTop = stripLog.scrollHeight;
     syncStripJump();
   }
@@ -677,9 +676,9 @@ export async function mount(root, ctx) {
   function openStrip(on) {
     const was = strip.classList.contains("open"), h0 = strip.getBoundingClientRect().height;
     strip.classList.toggle("open", on);
-    (on ? stripHead : stripRow).append(stripTools);
+    if (on) stripHead.insertBefore(stripTools, tmBtn); else stripRow.append(stripTools); // open: new thread, threads, full thread
     if (!on) closeMenu();
-    const what = on ? "Collapse" : "Expand";
+    const what = on ? "Fold" : "Unfold";
     fold.setAttribute("aria-expanded", String(on)); fold.dataset.tip = what; fold.setAttribute("aria-label", what);
     const saved = Number(localStorage.getItem(STRIP_KEY));
     if (on && saved && !strip.style.getPropertyValue("--strip-h")) strip.style.setProperty("--strip-h", saved + "px");
@@ -772,10 +771,21 @@ export async function mount(root, ctx) {
     for (const m of st.histMsgs.values())
       if (m.data.role === "agent" && m.data.status === "done" && m.data.actions?.length && !m.data.actionsDone) runActions(m);
   }
+  // A reply to a notice (a local service started the turn, nobody asked on a
+  // page): run it in the view whose own conversation it is, when that view is on
+  // screen. A view whose thread is shared by several scopes (boards) opts in
+  // with ownThread only if each scope has its own thread.
+  function noticeReply(m) {
+    if (isAlt() || !st.hist || st.hist.data.view !== emb.view || m.data.thread !== st.hist.id) return false;
+    if (!(Number(m.created) > Date.now() - 2 * 864e5)) return false;
+    if (scopeOf(emb) && !emb.ownThread) return false;
+    for (const u of st.histMsgs.values()) if (u.data.reply === m.id) return !!u.data.notice;
+    return false;
+  }
   async function runActions(m) {
     if (ran.has(m.id)) return;
     const rec = askedAll()[m.id];
-    if (!mine.has(m.id) && !rec) return;
+    if (!mine.has(m.id) && !rec && !noticeReply(m)) return;
     if (rec && (rec.view !== emb.view || (rec.scope || "") !== scopeOf(emb))) return; // not on screen now: later
     ran.add(m.id);
     // claim it (conditional write): only one page runs a reply
@@ -790,7 +800,7 @@ export async function mount(root, ctx) {
     }
     forget(m.id);
     if (!claimed) return;
-    const report = [], run = runFor.get(m.id) || (rec ? emb.run : null); // another view's conversation: that view runs its own commands
+    const report = [], run = runFor.get(m.id) || (rec || !mine.has(m.id) ? emb.run : null); // another view's conversation: that view runs its own commands
     for (const a of m.data.actions) {
       const [id, ...rest] = a.args.split(/\s+/), arg = rest.join(" ");
       try {
@@ -841,7 +851,7 @@ export async function mount(root, ctx) {
   // chat through ctx.embed: it moves into their box and shows their own view
   // conversation (view:<name>). One at a time; the thread list takes it back
   // when its level returns.
-  const HOME = { view: "threads", title: "Thread list conversation", hint: "Talk to the list with the bar below: open, rename or hide threads",
+  const HOME = { view: "threads", title: "Thread list conversation",
     from: "thread list", describe: () => describeList(), run: null };
   let emb = HOME;
   function embed(view, box, opts = {}) {
@@ -1222,7 +1232,7 @@ export async function mount(root, ctx) {
     thread: () => st.threads.find(t => t.id === st.open) || null, // the open thread item
     open: t => { st.threads = [t, ...st.threads.filter(x => x.id !== t.id)]; return openThread(t.id, true); },
     messageEl, // a message item drawn as in the log
-    embed, // embed(view, box, {title, hint, from, describe, run}) -> {send}: the embedded chat in another level
+    embed, // embed(view, box, {title, from, describe, run, scope?, ownThread?}) -> {send}: the embedded chat in another level
     onDraw: fn => { drawHooks.add(fn); if (st.open) fn(st.open); return () => drawHooks.delete(fn); }, // after each full redraw
   };
 }

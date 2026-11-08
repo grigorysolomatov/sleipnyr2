@@ -176,7 +176,7 @@ export function mount(box, ctx) {
     + `\nThis chat is the Theme view's own history; the view acts on your reply. Reply with ONE short sentence (at most 12 words, `
     + `shown on a single line), then one line per action, exactly:\n@set <token> <value>   (colours as #rrggbb; radius 0-24, font-size 12-24 as <n>px)\n`
     + `@reset <token>   (back to its default)\n@reset all   (the whole default look)\n`
-    + `The view runs these lines itself and does not show them: do not call any tool or API for them. Use only the tokens listed. Never delete anything.]`;
+    + `The view runs these lines itself and does not show them. Do not call tools for these lines; to show, point at or play something on screen, use the sleipnyr2 view_* tools (view_describe first). Use only the tokens listed. Never delete anything.]`;
   const run = async (name, args) => {
     const [k, v] = String(args).trim().split(/\s+/);
     if (name === "reset" && k === "all") { await resetEverything(); return "reset all"; }

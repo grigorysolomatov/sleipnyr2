@@ -40,7 +40,7 @@
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, sign, verify, type KeyObject } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Bytes, Item, Kernel, ServerPlugin } from "../../kernel/contract.ts";
+import { bad, type Bytes, type Item, type Kernel, type ServerPlugin } from "../../kernel/contract.ts";
 
 export interface Peer { id: string; name: string; url: string; key: string }
 export interface Sent { name: string; mime: string; id: string }
@@ -460,7 +460,6 @@ export class People {
 
 let people: People | null = null;
 const need = () => { if (!people) throw new Error("people not started"); return people; };
-const bad = (e: unknown) => Response.json({ error: (e as Error).message || String(e) }, { status: (e as { status?: number }).status || 400 });
 
 const plugin: ServerPlugin = {
   start(k) { people = new People(k); people.start((k.config as { inbox?: { host?: string; port?: number } }).inbox); },

@@ -22,8 +22,8 @@
 .tm-all { margin-left: auto; }
 .tm-body {
   flex: 1; min-height: 0; overflow-y: auto; padding: .75rem calc(.75rem + var(--side)) 1rem;
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
-  mask-image: linear-gradient(to bottom, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+  -webkit-mask-image: var(--fade-mask);
+  mask-image: var(--fade-mask);
 }
 .tm-note { margin: 0; padding: .35rem calc(.75rem + var(--side)); font-size: .85em; color: var(--text-muted); border-top: 1px solid var(--text); }
 .tm-note.err { color: var(--text); }

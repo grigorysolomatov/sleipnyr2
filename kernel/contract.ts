@@ -240,3 +240,9 @@ export interface ServerPlugin {
   routes?(kernel: Kernel): Record<string, Handler>;
   stop?(): void | Promise<void>;
 }
+
+/** A route's error answer: {error} with the error's own status (HttpError and the
+ *  like carry one), else the given default. Shared by the plugin servers. */
+export function bad(e: unknown, status = 400): Response {
+  return Response.json({ error: (e as Error)?.message || String(e) }, { status: (e as { status?: number })?.status || status });
+}
