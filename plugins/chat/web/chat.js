@@ -15,6 +15,7 @@ import { render } from "/web/text.js";
 const API = "/p/chat";
 const IMAGE = /^image\//;
 const DOWN = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+const LEFT = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>';
 const UP = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>';
 const FULL = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-8 8M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>';
 const STOP = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6.5" y="6.5" width="11" height="11" rx="1.5"/></svg>';
@@ -137,7 +138,8 @@ export async function mount(root, ctx) {
     steps: new Map(), // reply id -> {cur, prev, at}: step line text, for the crossfade
     fades: new Map(), // reply id -> {len, segs:[[from, t]]} streamed text still fading in
     agentNames: new Map(), // agent id -> display name
-    hist: null, // the thread list's history thread (item), made on first use
+    hist: null, // the thread the embedded chat shows: the view's history thread (item, made on first use) or, from the threads menu, any other thread
+    viewThread: null, altView: "", // the view's own history thread, and the view the strip was last pinned for
     histLast: null, // its latest {user, reply} messages, for the strip's one line
     histMsgs: new Map(), // id -> message item of that thread, for the expanded strip
     histLive: new Map(), // reply id -> {progress} streamed for it, for the strip's line
@@ -160,19 +162,23 @@ export async function mount(root, ctx) {
   const stripMsgs = h("div", { class: "c-strip-msgs" });
   const stripLog = h("div", { class: "c-strip-log", role: "log", "aria-live": "polite" }, stripMsgs);
   const fold = h("button", { class: "c-btn c-ic c-strip-fold", type: "button", "aria-expanded": "false", "data-tip": "Expand", "aria-label": "Expand",
-    onclick: () => openStrip(!strip.classList.contains("open")) }, svg(UP));
+    onclick: () => openStrip(!strip.classList.contains("open")) }, svg(DOWN));
+  // threads menu (left arrow = up one level): this view's conversation, its earlier ones, recent threads
+  const tmBtn = h("button", { class: "c-btn c-ic c-tm-btn", type: "button", "aria-haspopup": "menu", "data-tip": "Threads for this view", "aria-label": "Threads for this view",
+    onclick: () => (tm.hidden ? openMenu() : closeMenu()) }, svg(LEFT));
+  const tm = h("div", { class: "c-tm", role: "menu", "aria-label": "Threads for this view", hidden: true });
   const stripTools = h("span", { class: "c-strip-tools" }); // moves between the line and the header
   const stripName = h("b", {}, "Thread list conversation");
   const stripHead = h("div", { class: "c-strip-head", "data-tip": "Embedded chat: drag to resize, tap to fold" },
-    h("span", { class: "c-strip-grip", "aria-hidden": "true" }), fold,
+    h("span", { class: "c-strip-grip", "aria-hidden": "true" }), tmBtn,
     stripName,
     h("button", { class: "c-btn c-ic", type: "button", "data-tip": "Open as a full thread", "aria-label": "Open as a full thread",
-      onclick: () => { if (st.hist) openThread(st.hist.id, true); } }, svg(FULL)));
+      onclick: () => { if (st.hist) openThread(st.hist.id, true); } }, svg(FULL)), fold);
   // stop: only while a turn of this conversation runs or waits (the running one stops first)
   const stripStop = h("button", { class: "c-btn c-ic c-stop", type: "button", hidden: true, "data-tip": `Stop ${agentName}`, "aria-label": `Stop ${agentName}`,
     onclick: () => { if (st.hist) stopTurn(st.hist.id); } }, svg(STOP));
   const stripRow = h("div", { class: "c-strip-row" }, stripLine, stripStop, stripTools);
-  const strip = h("section", { class: "c-strip", hidden: true, "aria-label": "Embedded chat" }, stripHead, stripLog, stripRow);
+  const strip = h("section", { class: "c-strip", hidden: true, "aria-label": "Embedded chat" }, stripHead, stripLog, stripRow, tm);
   const side = h("nav", { class: "c-side" },
     h("header", { class: "c-bar" },
       ctx.levels?.up ? h("button", { class: "c-btn c-up", type: "button", "data-tip": "All modalities", "aria-label": "All modalities",
@@ -448,7 +454,7 @@ export async function mount(root, ctx) {
   // ------------------------------------------------------------ live updates
   ctx.on("item", ({ item }) => {
     if (item.type === "thread") {
-      if (item.data.view) { if (item.data.view === emb.view) { if (st.hist?.id === item.id) st.hist = item; else pinHist(item); } } // never listed
+      if (item.data.view) { if (item.data.view === emb.view) { st.viewThread = item; if (st.hist?.id === item.id) st.hist = item; else if (!isAlt()) pinHist(item); } } // never listed
       else {
         const i = st.threads.findIndex(t => t.id === item.id);
         if (i >= 0) st.threads.splice(i, 1);
@@ -457,6 +463,7 @@ export async function mount(root, ctx) {
         drawThreads();
       }
       if (item.id === st.open) { title.textContent = item.data.title; mb.refresh(); }
+      if (st.hist?.id === item.id && !item.data.view) { st.hist = item; setStripName(); }
     } else if (item.type === "message") {
       if (st.hist && item.data.thread === st.hist.id) try { histMessage(item); } catch (e) { console.error(e); }
       if (item.data.thread !== st.open) return;
@@ -510,6 +517,7 @@ export async function mount(root, ctx) {
   const short = (s, n) => { const t = String(s || "").replace(/\s+/g, " ").trim(); return t.length > n ? t.slice(0, n - 1) + "…" : t; };
 
   async function loadHist(view = emb.view) {
+    if (isAlt() && st.altView === view) return; // showing another thread from the menu
     try { await pinHist(await ctx.api(`${API}/views/${encodeURIComponent(view)}/thread`, { method: "POST", json: {} })); }
     catch (e) { console.error(e); }
   }
@@ -519,6 +527,8 @@ export async function mount(root, ctx) {
   async function pinHist(t) {
     const mine = ++pinning;
     st.hist = t;
+    if (t.data.view) st.viewThread = t; else st.altView = emb.view;
+    setStripName();
     const msgs = await ctx.api(`${API}/threads/${encodeURIComponent(t.id)}/messages`);
     if (mine !== pinning) return;
     st.histMsgs = new Map(msgs.map(m => [m.id, m]));
@@ -531,6 +541,61 @@ export async function mount(root, ctx) {
     for (const fn of st.stripHooks) try { fn(t.id); } catch (e) { console.error(e); }
     retryPending();
   }
+
+  // a thread shown in place of the view's conversation (picked in the threads menu, or a next thread of it)
+  const isAlt = () => !!st.hist && !st.hist.data.view;
+  function setStripName() {
+    stripName.textContent = isAlt() ? st.hist.data.title || "Thread" : emb.title || `${emb.view} conversation`;
+    tmBtn.classList.toggle("alt", isAlt());
+  }
+
+  // ------------------------------------------------------------ threads menu of the embedded chat
+  const dayTime = t => { const d = new Date(Number(t)), now = new Date();
+    return d.toDateString() === now.toDateString() ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }) : d.toLocaleDateString([], { day: "numeric", month: "short" }); };
+  let menuToken = 0;
+  async function openMenu() {
+    const mine = ++menuToken;
+    tm.hidden = false; placeMenu();
+    // the view's own conversation, plus the conversations it had before a next thread replaced them (the from chain)
+    let own = st.viewThread;
+    if (!own || own.data.view !== emb.view) { try { own = await ctx.api(`${API}/views/${encodeURIComponent(emb.view)}/thread`, { method: "POST", json: {} }); st.viewThread = own; } catch (e) { console.error(e); } }
+    const earlier = [], seen = new Set(own ? [own.id] : []);
+    for (let id = own?.data.from; id && !seen.has(id) && earlier.length < 6; ) {
+      seen.add(id);
+      let it; try { it = await ctx.api(`/k/items/${encodeURIComponent(id)}`); } catch { break; }
+      earlier.push(it); id = it.data.from;
+    }
+    if (mine !== menuToken || tm.hidden) return;
+    const recent = st.threads.filter(t => !seen.has(t.id) && !t.data.hidden).slice(0, 8);
+    const row = (t, name, what) => h("button", { class: "c-tm-row" + (st.hist?.id === t.id ? " here" : ""), type: "button", role: "menuitem", "data-id": t.id,
+      "aria-current": st.hist?.id === t.id ? "true" : null, onclick: () => pickThread(t) },
+      h("span", {}, name), h("small", {}, what));
+    const head = text => h("div", { class: "c-tm-h" }, text);
+    tm.replaceChildren(
+      head("Conversations here"),
+      own ? row(own, emb.title || `${emb.view} conversation`, "This view's own · " + dayTime(own.updated)) : null,
+      ...earlier.map(t => row(t, String(t.data.title || "Thread").replace(/ \(until [^)]*\)$/, ""), "Earlier here · " + dayTime(t.updated))),
+      recent.length ? head("Recent threads") : null,
+      ...recent.map(t => row(t, t.data.title || "Thread", dayTime(t.updated))));
+    placeMenu();
+  }
+  function closeMenu() { menuToken++; tm.hidden = true; }
+  // hangs under the header; above it when the strip leaves no room below
+  function placeMenu() {
+    const p = strip.getBoundingClientRect(), b = stripHead.getBoundingClientRect(), vh = innerHeight - 64;
+    const below = vh - b.bottom - 8, above = b.top - 8;
+    const up = below < 180 && above > below;
+    tm.style.maxHeight = Math.max(120, Math.min(Math.round(up ? above : below), 420)) + "px";
+    tm.style.top = up ? "" : `${b.bottom - p.top + 4}px`;
+    tm.style.bottom = up ? `${p.bottom - b.top + 4}px` : "";
+  }
+  async function pickThread(t) {
+    closeMenu();
+    try { await pinHist(t); if (!strip.classList.contains("open")) openStrip(true); }
+    catch (e) { console.error(e); }
+  }
+  document.addEventListener("pointerdown", e => { if (!tm.hidden && !tm.contains(e.target) && !tmBtn.contains(e.target)) closeMenu(); });
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && !tm.hidden) closeMenu(); });
 
   // collapsed: one line, the last answer (or spinner, time and step while it works)
   function drawStripLine() {
@@ -572,6 +637,7 @@ export async function mount(root, ctx) {
     const was = strip.classList.contains("open"), h0 = strip.getBoundingClientRect().height;
     strip.classList.toggle("open", on);
     (on ? stripHead : stripRow).append(stripTools);
+    if (!on) closeMenu();
     const what = on ? "Collapse" : "Expand";
     fold.setAttribute("aria-expanded", String(on)); fold.dataset.tip = what; fold.setAttribute("aria-label", what);
     const saved = Number(localStorage.getItem(STRIP_KEY));
@@ -740,17 +806,18 @@ export async function mount(root, ctx) {
   function embed(view, box, opts = {}) {
     if (!/^[a-z][a-z0-9-]{0,30}$/.test(view)) throw new Error("bad view name");
     emb = { ...opts, view };
-    stripName.textContent = emb.title || `${view} conversation`;
+    closeMenu();
     if (strip.parentElement !== box || strip.nextElementSibling) box.append(strip);
-    if (st.hist?.data.view !== view) { strip.hidden = true; st.hist = null; loadHist(view); } else drawStrip();
-    return { send: body => sendView(view, body), busy: () => st.hist?.data.view === view && busyIn(st.histMsgs), retry: () => retryPending() };
+    if (isAlt() && st.altView === view) { setStripName(); drawStrip(); } // a picked thread stays while this view stays
+    else if (st.hist?.data.view !== view) { strip.hidden = true; st.hist = null; setStripName(); loadHist(view); } else { setStripName(); drawStrip(); }
+    return { send: body => sendView(view, body), busy: () => (isAlt() ? st.altView === view : st.hist?.data.view === view) && busyIn(st.histMsgs), retry: () => retryPending() };
   }
   function embedHome() { embed("threads", side, HOME); }
   async function sendView(view, body) {
     const e = emb;
     if (e.view !== view) throw new Error("that conversation is not on screen");
     const context = e.describe ? await e.describe() : "";
-    if (st.hist?.data.view !== view) await pinHist(await ctx.api(`${API}/views/${encodeURIComponent(view)}/thread`, { method: "POST", json: {} }));
+    if (!(isAlt() && st.altView === view) && st.hist?.data.view !== view) await pinHist(await ctx.api(`${API}/views/${encodeURIComponent(view)}/thread`, { method: "POST", json: {} }));
     const out = await ctx.api(`${API}/threads/${encodeURIComponent(st.hist.id)}/messages`, { json: { ...body, context, from: e.from || view } });
     // the server has it: a drawing glitch must not look like "not sent"
     mine.add(out.reply.id); if (e.run) runFor.set(out.reply.id, e.run);

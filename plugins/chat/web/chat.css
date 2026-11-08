@@ -84,6 +84,21 @@ body:has(.c-shell:not(.thread-open) .c-strip:not([hidden])) { --bar-line: var(--
 .c-strip-head b { flex: 1; font-size: .85em; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .c-strip-head .c-btn { border: none; }
 .c-strip-head .c-btn:hover { color: var(--text-muted); }
+.c-tm-btn.alt { color: var(--accent-here); /* another thread than the view's own is shown */ }
+.c-tm {
+  position: absolute; z-index: 20; left: calc(4px + var(--side)); display: flex; flex-direction: column; overflow-y: auto; width: min(22rem, calc(100% - 8px - 2 * var(--side)));
+  padding: .25rem; background: var(--bg); border: 1px solid var(--text); border-radius: var(--radius);
+}
+.c-tm[hidden] { display: none; }
+.c-tm-h { margin: .4rem .7rem .2rem; color: var(--text-muted); font-size: .8em; }
+.c-tm-row {
+  display: flex; flex-direction: column; align-items: flex-start; gap: .1rem; padding: .5rem .7rem; flex: none; min-width: 0;
+  background: none; border: none; border-left: 2px solid transparent; border-radius: calc(var(--radius) - 2px); color: var(--text); text-align: left; cursor: pointer;
+}
+.c-tm-row > span { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.c-tm-row:hover, .c-tm-row:focus-visible { background: var(--surface); }
+.c-tm-row.here { border-left-color: var(--accent-here); /* where you are = pink */ background: var(--surface); }
+.c-tm-row small { color: var(--text-muted); font-size: .8em; }
 .c-strip-grip { position: absolute; top: 4px; left: 50%; width: 2.25rem; height: 3px; transform: translateX(-50%); border-radius: 2px; background: var(--line); }
 .c-strip-log {
   display: none; overflow-y: auto; padding: .75rem var(--side); flex-direction: column; gap: .9rem; font-size: .92em;
