@@ -37,7 +37,7 @@ export function mount(box, ctx) {
   box.append(h("header", { class: "tt-bar" }, back, h("b", { class: "tt-title" }, "Task Tinder"), go), h("div", { class: "tt-body" }, stack, note));
 
   const say = (t, err = false) => { note.textContent = t; note.classList.toggle("err", err); };
-  const meta = c => [c.data.board, TIER[c.data.tier] || c.data.tier, c.data.cost].filter(Boolean).join(" · ");
+  const meta = c => [c.data.board, conf?.tiers?.[c.data.tier]?.label || c.data.tier, c.data.cost].filter(Boolean).join(" · ");
 
   function draw() {
     const [top, next] = st.cards;
@@ -59,7 +59,7 @@ export function mount(box, ctx) {
   }
 
   async function load() {
-    try { const q = await ctx.api(`${API}/queue`); st.cards = q.cards; st.counts = q.counts; lift(); } catch (e) { say(`Could not load: ${e.message}`, true); }
+    try { await settings(); const q = await ctx.api(`${API}/queue`); st.cards = q.cards; st.counts = q.counts; lift(); } catch (e) { say(`Could not load: ${e.message}`, true); }
     if (!st.busy) draw();
   }
 
