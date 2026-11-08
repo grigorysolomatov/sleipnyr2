@@ -29,7 +29,7 @@
 .pp-row small { color: var(--text-muted); font-size: .8em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pp-list time { color: var(--text-muted); font-size: .8em; flex: none; }
 .pp-note { margin: .9rem calc(.75rem + var(--side)) 0; color: var(--text-muted); font-size: .85em; }
-.pp-private { margin-top: auto; padding-bottom: .9rem; }
+.pp-private { padding-bottom: .9rem; }
 /* the other person's name: plain white (you = pink, the agent = purple) */
 .pp-msg.pp-in .c-who b { color: var(--text); }
 .pp-state { display: flex; align-items: center; gap: .4rem; margin: .35rem 0 0; color: var(--text-muted); font-size: .8em; }
@@ -40,3 +40,52 @@
 }
 .pp-retry:hover { color: var(--text); }
 .pp-retry svg { width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+/* pairing: two frameless symbol buttons top right, a popover under them (one popover look) */
+.pp-tools { display: flex; gap: .1rem; margin-left: auto; }
+.pp-tools[hidden] { display: none; }
+.pp-ic {
+  display: inline-grid; place-items: center; width: 2.75rem; min-height: 2.5rem; padding: 0;
+  background: none; border: none; color: var(--text); cursor: pointer;
+}
+.pp-ic:hover, .pp-ic:focus-visible { color: var(--text-muted); }
+.pp-ic svg { width: 1.35rem; height: 1.35rem; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.pp-ic.sm { width: 2rem; min-height: 2rem; flex: none; }
+.pp-ic.sm svg { width: 1rem; height: 1rem; }
+.pp-pop {
+  position: absolute; z-index: 20; display: flex; flex-direction: column; gap: .35rem; width: min(24rem, calc(100% - 8px));
+  max-height: calc(100% - 5rem); overflow-y: auto; padding: .45rem .7rem .7rem; background: var(--bg);
+  border: 1px solid var(--text); border-radius: var(--radius);
+}
+.pp-pop[hidden] { display: none; }
+.pp-q { margin: .2rem 0 .1rem; color: var(--text-muted); font-size: .8em; }
+.pp-line { margin: 0; font-size: .9em; overflow-wrap: anywhere; }
+.pp-line.muted { color: var(--text-muted); font-size: .8em; }
+.pp-line.bad { color: var(--text); }
+.pp-line.ok { color: var(--text-muted); }
+.pp-line[hidden] { display: none; }
+.pp-code pre { margin: .1rem 0; padding: .5rem .6rem; background: var(--surface); border-radius: var(--radius); font-size: .8em; }
+.pp-row2 { display: flex; gap: .4rem; align-items: center; }
+.pp-row2.end { justify-content: flex-end; }
+.pp-field {
+  flex: 1; min-width: 0; padding: .5rem .6rem; background: var(--bg); color: var(--text); font: inherit; font-size: .9em;
+  border: 1px solid var(--line); border-radius: var(--radius);
+}
+.pp-field:focus { outline: none; border-color: var(--text); }
+.pp-paste { resize: vertical; font-family: var(--font-mono, monospace); font-size: .8em; }
+.pp-go {
+  flex: none; padding: .45rem .9rem; background: none; color: var(--text); font: inherit; font-size: .9em;
+  border: 1px solid var(--text); border-radius: var(--radius); cursor: pointer;
+}
+.pp-go:hover, .pp-go:focus-visible { background: var(--surface); }
+.pp-go:disabled { opacity: .6; cursor: default; }
+.pp-safety { margin: .1rem 0; font-size: 1.6em; letter-spacing: .12em; font-variant-numeric: tabular-nums; color: var(--accent-here); }
+.pp-addr { display: flex; flex-direction: column; gap: .3rem; }
+/* under the list: the inbox address and whether it answers */
+.pp-foot { margin-top: auto; display: flex; flex-direction: column; }
+.pp-inbox {
+  display: flex; flex-direction: column; gap: .3rem; padding: .6rem calc(.75rem + var(--side)) 0; border-top: 1px solid var(--text);
+}
+.pp-ib { flex: 1; min-width: 0; display: flex; flex-direction: column; font-size: .85em; }
+.pp-url { color: var(--text-muted); overflow-wrap: anywhere; }
+.pp-safe-line { margin: 0 0 .4rem; color: var(--text-muted); font-size: .8em; text-align: center; }

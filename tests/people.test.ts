@@ -6,7 +6,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp } from "../kernel/server.ts";
-import { checkRequest, keysOf, People, peersOf, signRequest } from "../plugins/people/server.ts";
+import { checkRequest, decodeInvite, encodeInvite, idFor, keysOf, People, peersOf, safetyCode, signRequest } from "../plugins/people/server.ts";
+import { existsSync, readFileSync, statSync } from "node:fs";
 
 const key = () => generateKeyPairSync("ed25519").privateKey.export({ format: "der", type: "pkcs8" }).toString("base64");
 const A = key(), B = key(), EVE = key();
@@ -116,4 +117,92 @@ test("without a key or peers nothing listens and the summary says so", () => {
   expect(none.ready).toBe(false);
   expect(none.summary().me.key).toBe("");
   expect(() => none.write("bo", { text: "x" })).toThrow();
+});
+
+// ---------------------------------------------------------------- invite pairing
+
+const pk = (app: typeof a, name: string, dir: string, extra: Record<string, unknown> = {}) => ({
+  items: app.store.items("people"), links: app.store.links(), files: app.store.files("people"),
+  config: { inbox: { port: 0 }, ...extra }, user: { id: "me", name }, log: () => {}, privateDir: dir, events: { publish: () => {}, subscribe: () => () => {} },
+}) as any;
+const tmp = (n: string) => { const d = mkdtempSync(join(tmpdir(), `sleipnyr2-people-${n}-`)); dirs.push(d); return join(d, "private"); };
+
+test("invite codes round-trip, survive line breaks and a surrounding message, and expire", () => {
+  const inv = { v: 1 as const, name: "Ada", url: "https://ada.example.ts.net:10000", key: keysOf(A).pub, token: "t".repeat(32), exp: Date.now() + 1000 };
+  const code = encodeInvite(inv);
+  expect(decodeInvite(code)).toEqual(inv);
+  expect(decodeInvite(`Hi! Here is my code:\n${code.slice(0, 30)}\n${code.slice(30)} \nbye`)).toEqual(inv);
+  expect("error" in decodeInvite(code, inv.exp + 1)).toBe(true);
+  expect("error" in decodeInvite("hello")).toBe(true);
+  expect("error" in decodeInvite(code.slice(0, -10))).toBe(true);
+});
+
+test("safety codes match on both sides and differ per pair; ids are unique", () => {
+  const ka = keysOf(A).pub, kb = keysOf(B).pub, ke = keysOf(EVE).pub;
+  expect(safetyCode(ka, kb)).toBe(safetyCode(kb, ka));
+  expect(safetyCode(ka, kb)).toMatch(/^\d{3} \d{3}$/);
+  expect(safetyCode(ka, ke)).not.toBe(safetyCode(ka, kb));
+  expect(idFor("Jón Ó", ["jon-o"])).toBe("jon-o-2");
+});
+
+test("invite -> accept pairs both sides without a restart; the token is single use; keys stay private", async () => {
+  const da = tmp("ia"), db = tmp("ib"), de = tmp("ie");
+  let qa: People, qb: People, qe: People;
+  const net = (async (u: string, init: RequestInit = {}) => {
+    const target = u.startsWith("https://ada.test") ? qa : u.startsWith("https://bo.test") ? qb : null;
+    if (!target) throw new Error("connection refused");
+    return target.receive(new Request(u, init));
+  }) as any;
+  qa = new People(pk(a, "Cy", da, { publicUrl: "https://ada.test" }), {}, net);
+  qb = new People(pk(b, "Dee", db), {}, net);
+  qe = new People(pk(b, "Eve", de, { publicUrl: "https://eve.test" }), {}, net);
+  expect(qa.ready).toBe(false);
+  expect(existsSync(join(da, "key"))).toBe(false);
+  // B has no address yet: accepting asks for it first
+  const { code } = qa.invite();
+  expect(qa.ready).toBe(true);
+  expect(statSync(join(da, "key")).mode & 0o777).toBe(0o600);
+  expect(statSync(da).mode & 0o777).toBe(0o700);
+  expect(JSON.stringify(qa.summary())).not.toContain(readFileSync(join(da, "key"), "utf8").trim());
+  expect(code).not.toContain(readFileSync(join(da, "key"), "utf8").trim().slice(20, 60));
+  await expect(qb.accept(code)).rejects.toThrow(/address/);
+  qb.setPublicUrl("https://bo.test/");
+  const got = await qb.accept(code);
+  expect(got.peer.name).toBe("Cy");
+  expect(got.warning).toBeUndefined(); // A could reach B's inbox
+  expect(qa.peers.map(p => p.name)).toEqual(["Dee"]);
+  expect(qb.peers.map(p => p.name)).toEqual(["Cy"]);
+  expect(qa.summary().peers[0].safety).toBe(got.safety);
+  expect(qb.summary().peers[0].safety).toBe(got.safety);
+  // messages flow both ways right away
+  qb.write(got.peer.id, { text: "paired!" }); await qb.flush(got.peer.id);
+  expect(qa.all(qa.peers[0].id).map(m => m.data.text)).toEqual(["paired!"]);
+  // the same code again (Eve copied it): refused, nothing added
+  await expect(qe.accept(code)).rejects.toThrow(/already used|expired/);
+  expect(qa.peers.length).toBe(1);
+  // a fresh token, but the request is signed by a key other than the one it names: refused
+  const { code: c2 } = qa.invite(), inv = decodeInvite(c2) as any;
+  const ev = keysOf(EVE), body = JSON.stringify({ v: 1, to: inv.key, token: inv.token, name: "Mallory", url: "https://m.test", key: keysOf(B).pub });
+  const r = await qa.receive(new Request("https://ada.test/peer/pair", { method: "POST", body, headers: signRequest(ev.priv, keysOf(B).pub, "/peer/pair", body) }));
+  expect(r.status).toBe(401);
+  expect(qa.peers.length).toBe(1);
+  // an unknown token
+  const r2 = await qa.receive(new Request("https://ada.test/peer/pair", { method: "POST", body: body.replace(inv.token, "x".repeat(32)), headers: {} }));
+  expect(r2.status).toBe(403);
+  // own invite
+  await expect(qa.accept(c2)).rejects.toThrow(/own invite/);
+  // restart: the key and the people come back from the private folder
+  const again = new People(pk(a, "Cy", da, { publicUrl: "https://ada.test" }), {}, net);
+  expect(again.keys!.pub).toBe(qa.keys!.pub);
+  expect(again.peers.map(p => p.name)).toEqual(["Dee"]);
+  for (const x of [qa, qb, qe, again]) x.stop();
+});
+
+test("PEOPLE_KEY in the environment wins over a key file", () => {
+  const d = tmp("env");
+  const q = new People(pk(a, "Ada", d, { publicUrl: "https://ada.test" }), {}, (async () => { throw new Error("x"); }) as any);
+  q.invite(); q.stop();
+  const e = new People(pk(a, "Ada", d), { PEOPLE_KEY: A });
+  expect(e.keys!.pub).toBe(keysOf(A).pub);
+  expect(e.keyFrom).toBe("env");
 });

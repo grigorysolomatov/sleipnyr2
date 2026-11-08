@@ -168,7 +168,7 @@ export async function createApp(config: Config) {
 
   const kernelFor = (id: string): Kernel => ({
     contract: CONTRACT_VERSION, items: store.items(id), links: store.links(), files: store.files(id),
-    events, services, config: config.plugins[id] || {}, user: config.user, app: { ...config.app, agentName: config.app.agentName || "Agent" },
+    events, services, config: config.plugins[id] || {}, user: config.user, privateDir: join(config.dataDir, "private", id), app: { ...config.app, agentName: config.app.agentName || "Agent" },
     log: (...a) => console.log(`[${id}]`, ...a),
   });
 

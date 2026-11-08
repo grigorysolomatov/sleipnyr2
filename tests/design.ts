@@ -40,7 +40,10 @@ const STATES: State[] = [
   { name: "blackboards", path: "/m/blackboards", ready: "[data-k-kind]" },
   { name: "blackboard", path: `/m/blackboards/${board}`, ready: ".ss-win" },
   { name: "theme", path: "/m/theme", ready: ".tm-row" },
-];
+  { name: "people", path: "/m/people", ready: ".pp-tools .pp-ic" },
+  { name: "people-invite", path: "/m/people", ready: ".pp-tools .pp-ic", act: click(".pp-tools .pp-ic"), popover: ".pp-pop" },
+  { name: "people-accept", path: "/m/people", ready: ".pp-tools .pp-ic", act: click(".pp-tools .pp-ic:nth-child(2)"), popover: ".pp-pop" },
+].filter(st => !process.env.ONLY || process.env.ONLY.split(",").includes(st.name)); // ONLY=a,b: a test instance with some plugins
 
 // the in-page checks; returns findings as strings
 const CHECKS = `(async (popover) => {

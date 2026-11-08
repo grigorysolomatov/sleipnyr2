@@ -21,6 +21,9 @@ let
       speakUrl = "http://127.0.0.1:${toString cfg.speakPort}/api/speak";
     };
   } cfg.settings);
+  # the people plugin sends to other people's inboxes (docs/PEERS.md): only
+  # then may the app open connections beyond localhost
+  peopleOn = (cfg.settings.plugins or { }) ? people;
   hardening = {
     NoNewPrivileges = true;
     ProtectSystem = "strict";
@@ -101,13 +104,14 @@ in
         Group = "sleipnyr2";
         EnvironmentFile = lib.optional (cfg.environmentFile != null) cfg.environmentFile;
         ReadWritePaths = [ "${cfg.stateDir}/data" ];
-        IPAddressAllow = [ "localhost" ];
-        IPAddressDeny = "any";
         Restart = "always";
         RestartSec = 3;
         MemoryMax = "1G";
         # bun's JIT needs writable+executable memory
         MemoryDenyWriteExecute = false;
+      } // lib.optionalAttrs (!peopleOn) {
+        IPAddressAllow = [ "localhost" ];
+        IPAddressDeny = "any";
       };
     };
 

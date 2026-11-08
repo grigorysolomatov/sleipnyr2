@@ -48,6 +48,10 @@
       "rules": [
         "Hard rule: no email or contact with anyone without {user}'s per-message OK. Produce drafts only; never send."
       ]
+    },
+    "people": {
+      "inbox": { "host": "127.0.0.1", "port": 8183 },
+      "publicUrl": ""
     }
   },
   "actions": {

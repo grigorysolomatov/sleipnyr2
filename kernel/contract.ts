@@ -223,6 +223,9 @@ export interface Kernel {
   /** this plugin's section of the config ("plugins.<id>"), plus shared "user" */
   config: Record<string, unknown>;
   user: { id: string; name: string };
+  /** a folder for this plugin's own private files (keys, tokens): never served by
+   *  the kernel API, not an item or a file; the plugin creates it (mode 0700) on first use */
+  privateDir?: string;
   /** shared app settings: agentName = how prompts and the UI name the agent (default "Agent") */
   app: { name: string; shortName: string; home: string; agentName: string };
   log(...args: unknown[]): void;

@@ -13,7 +13,7 @@ explains the architecture and `docs/INSTALL.md` the install steps.
 - Keep it on 127.0.0.1 plus `tailscale serve` (tailnet only). There is no
   login yet: never expose it with `tailscale funnel` or a public proxy.
   The one exception is the `people` inbox port (a separate listener that
-  only takes signed messages from configured peers; `docs/PEERS.md`).
+  only takes signed messages from paired people; `docs/PEERS.md`).
 - Test with throwaway threads named "(agent testing, ignore)" and tell your
   user afterwards so they can hide them.
 
@@ -52,10 +52,11 @@ Plugins and their settings (all optional unless marked):
 - `blackboards`, `columns`: none.
 - `projects`: `list` = [{id, title, doc}] (id lowercase, a-z0-9_-).
 - `people` (person-to-person chat, no agent; `docs/PEERS.md`): `name`
-  (default `user.name`), `keyEnv` (PEOPLE_KEY; the private key, made by
-  `bun plugins/people/keygen.ts`), `inbox` {host, port} (127.0.0.1:8183),
-  `peers` [{id, name, url, key}]. Without a key and a peer the plugin only
-  shows its empty view; nothing listens.
+  (default `user.name`), `publicUrl` (the inbox address others reach;
+  optional, else set in the view), `inbox` {host, port} (127.0.0.1:8183),
+  optional `keyEnv` (PEOPLE_KEY) and `peers` [{id, name, url, key}].
+  Pairing is by invite code in the view; the key is made on first use in
+  `<dataDir>/private/people/`. Nothing listens until then.
 - `tinder` (Task Tinder; creates Kanban cards on swipe right):
   - `kanbanUrl` (http://127.0.0.1:9120) + `keyEnv` (KANBAN_PROXY_KEY): an
     HTTP endpoint accepting `POST /api/plugins/kanban/tasks?board=<slug>`
@@ -75,6 +76,33 @@ Plugins and their settings (all optional unless marked):
   - `apiUrl`: how the agent reaches this app.
 
 The NixOS module fills `listen`, `dataDir` and the sidecar URLs itself.
+
+## People pairing: for your agent
+
+Person-to-person chat is agent-free by design: you never see the messages,
+the invite codes or the keys, and you must not try to (do not read
+`<dataDir>/private/`, do not call `/p/people/invite` or `/accept` for the
+user).
+
+What you can do:
+- Enable the plugin: `"people": {}` under `plugins` (NixOS: in the module
+  settings, then rebuild) and restart.
+- Check the inbox port is free (default 8183) and, if the user wants,
+  set `plugins.people.publicUrl` to `https://<machine>.<tailnet>.ts.net:10000`
+  (`tailscale status --json | jq -r .Self.DNSName` gives the name).
+- Check reachability without secrets: `curl -s <publicUrl>/peer/ping`
+  answers `{"ok":true,"key":...}` once the key exists and Funnel is on.
+- Run `sudo tailscale funnel --bg --https=10000 http://127.0.0.1:8183`
+  if you have sudo; it prints an approval link the first time.
+
+What the human must do:
+- Approve Funnel for the machine (the link from the command above, or the
+  Tailscale admin page > Access controls / Funnel). Only the tailnet owner
+  can.
+- Run that one sudo command if you cannot.
+- Tap Invite and send the code to the other person, or paste the code they
+  sent into Accept invite. Optionally compare the six-digit safety code by
+  phone.
 
 ## MCP actions (live effects on the user's open pages)
 
