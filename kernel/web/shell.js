@@ -43,6 +43,7 @@
 
 import { createActions, effectStyle, sleep } from "./actions.js";
 import { createBar, tooltips } from "./bar.js";
+import { ONE_SENTENCE, runs } from "./hcp.js";
 
 const root = document.getElementById("app");
 const parentShell = (() => {
@@ -225,8 +226,8 @@ function picker(ctx, box, mods, lv) {
   const describe = () => `[Sent from the Sleipnyr modality picker: the top level, a list of the ways to work with ${ctx.app.agentName} `
     + `("composed modalities"). On screen (id | title | what it is):\n${mods.map(p => `- ${p.id} | ${p.modality.title || p.name} | ${p.modality.doc || ""}`).join("\n")}\n`
     + `Came here from: ${lv.from() || "(start)"}. This chat is the picker's own history; the picker acts on your reply. `
-    + `Reply with ONE short sentence (at most 12 words, shown on a single line), then one line per action, exactly:\n`
-    + `@open <modality id>   (show that modality)\nThe picker runs these lines itself and does not show them. Do not call tools for these lines; to show, point at or play something on screen, use the sleipnyr2 view_* tools (view_describe first). `
+    + `${ONE_SENTENCE}, then one line per action, exactly:\n`
+    + `@open <modality id>   (show that modality)\n${runs("picker")} `
     + `Use only ids listed above. Never delete anything.]`;
   const run = async (name, args) => {
     const id = String(args).trim().split(/\s+/)[0];

@@ -5,11 +5,7 @@
   padding: .25rem calc(.75rem + var(--side)); padding-top: max(.25rem, env(safe-area-inset-top)); border-bottom: 1px solid var(--text);
 }
 /* back: the same symbol and look as the other levels' back control */
-.tm-back {
-  background: none; border: none; border-radius: var(--radius); min-width: 2.5rem; min-height: 2.5rem;
-  padding: 0 .6rem; cursor: pointer; line-height: 1; font-size: 1.6rem;
-}
-.tm-back:hover { color: var(--text-muted); }
+/* back chevron: .k-back in kernel/web/base.css */
 .tm-title { flex: 1; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* frameless stroked symbols, like the chat's header icons */
 .tm-ic {

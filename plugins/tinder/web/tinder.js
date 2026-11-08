@@ -4,7 +4,8 @@
 // card that runs), left = reject (kept, sinks, comes back later). Arrow keys
 // on a desktop. Comments go through the modality bar into the embedded chat
 // underneath and feed the next round. Replies carry "@suggest ..." lines.
-const BACK = "‹";
+import { ONE_SENTENCE } from "/web/hcp.js";
+import { backButton } from "/web/head.js";
 const SPARK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6.3 6.3l2.5 2.5M15.2 15.2l2.5 2.5M6.3 17.7l2.5-2.5M15.2 8.8l2.5-2.5"/></svg>';
 const API = "/p/tinder";
 const ME = "tinder";
@@ -29,7 +30,7 @@ export function mount(box, ctx) {
   const st = { cards: [], counts: {}, busy: false, note: "", asked: false, front: "" };
   // a card the agent brought to the top (view_focus): stays there on this page until decided
   const lift = () => { const i = st.cards.findIndex(c => c.id === st.front); if (i > 0) st.cards.unshift(...st.cards.splice(i, 1)); else if (i < 0) st.front = ""; };
-  const back = h("button", { class: "tt-back", type: "button", "data-tip": "All modalities", "aria-label": "All modalities", onclick: () => ctx.levels.up() }, BACK);
+  const back = backButton({ cls: "tt-back", tip: "All modalities", onclick: () => ctx.levels.up() });
   const go = h("button", { class: "c-btn c-ic tt-go", type: "button", "data-tip": `Ask ${AG} for task suggestions`, "aria-label": `Ask ${AG} for task suggestions`,
     onclick: () => activate() }, svg(SPARK));
   const stack = h("div", { class: "tt-stack" });
@@ -123,7 +124,7 @@ export function mount(box, ctx) {
       + `and the Kanban boards (hermes kanban boards list; hermes kanban --board <slug> list)${c.sources ? `, also ${c.sources}` : ""}, then propose `
       + `3 to 6 concrete, self-contained tasks an agent can finish alone, each one line. Skip anything already in the stack, accepted, `
       + `or rejected unless asked again. Email or contact tasks are drafts only (no sending without ${WHO}'s per-message OK).\n`
-      + `Reply with ONE short sentence (at most 12 words, shown on a single line), then one line per suggestion, exactly:\n`
+      + `${ONE_SENTENCE}, then one line per suggestion, exactly:\n`
       + `@suggest <board slug> | <tier> | <rough cost> | <title, at most 10 words> | <why, one short line>\n`
       + `tier = ${tiers || "default"}. Rough cost like "~20 min, ~3% of 5h". `
       + `Pick an existing board slug that fits the project (${c.defaultBoard} if none). The view runs these lines itself and does not `

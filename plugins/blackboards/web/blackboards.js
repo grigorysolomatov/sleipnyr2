@@ -31,6 +31,8 @@
 // replies may carry "@name args" lines (see describe()).
 import { render } from "/web/text.js";
 import { darkFrame } from "/web/frame.js";
+import { ONE_SENTENCE, runs } from "/web/hcp.js";
+import { backButton } from "/web/head.js";
 
 const ME = "blackboards";
 // the board's conversation (view history thread) keeps the old view name, so
@@ -40,7 +42,6 @@ const VIEW = "sessions";
 const WORD = "blackboard", WORDS = "blackboards";
 const Cap = w => w[0].toUpperCase() + w.slice(1);
 const WIN = "blackboards-window"; // the bar's second target: the focused window
-const BACK = "‹";
 const PLUS = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
 const UP = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>';
 const DOWN = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
@@ -113,7 +114,7 @@ export function mount(box, ctx) {
     els: new Map(), // window id -> {el, body, frame, src}
   };
   const titleEl = h("b", { class: "ss-title" });
-  const back = h("button", { class: "ss-back", type: "button", onclick: () => (st.open ? ctx.levels.go(ME, "") : ctx.levels.up()) }, BACK);
+  const back = backButton({ cls: "ss-back", onclick: () => (st.open ? ctx.levels.go(ME, "") : ctx.levels.up()) });
   const addBtn = icon(PLUS, `New ${WORD}`, () => (st.open ? togglePick() : newSession()), "ss-add");
   const fitBtn = icon(FIT, "Show all windows", () => fitAll(), "ss-fit");
   const arrBtn = icon(ARRANGE, "Arrange windows in a tidy grid", () => arrange(), "ss-arr");
@@ -917,8 +918,8 @@ export function mount(box, ctx) {
     await loadThreads();
     const threads = st.threads.slice(0, 25).map(t => `- ${t.id} | ${t.data.title || ""}`).join("\n");
     const commonOpen = `This chat is the ${Cap(WORDS)} view's own history; the view acts on your reply. `
-      + `Reply with ONE short sentence (at most 12 words, shown on a single line), then one line per action. `
-      + `The view runs these lines itself and does not show them. Do not call tools for these lines; to show, point at or play something on screen, use the sleipnyr2 view_* tools (view_describe first). Never delete anything.\n`;
+      + `${ONE_SENTENCE}, then one line per action. `
+      + `${runs("view")} Never delete anything.\n`;
     const common = commonOpen.trimEnd() + "]";
     if (!st.open) {
       await loadList();

@@ -35,10 +35,11 @@
 import { render } from "/web/text.js";
 import { itemList } from "/web/itemlist.js";
 import { darkFrame } from "/web/frame.js";
+import { ONE_SENTENCE, runs } from "/web/hcp.js";
+import { backButton } from "/web/head.js";
 
 const ME = "columns";
 const WIN = "columns-window"; // the bar's second target: the focused panel
-const BACK = "‹";
 const PLUS = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
 const UP = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>';
 const DOWN = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
@@ -113,7 +114,7 @@ export function mount(box, ctx) {
   const WHO = ctx.user?.name || "the user", AG = ctx.app?.agentName || "the agent";
   const st = { item: null, list: [], last: "", base: null, baseAt: 0, saveTimer: 0, here: "", threads: [], els: new Map(), cels: new Map(), at: "", showDis: false };
   box.classList.add("co-level");
-  const back = h("button", { class: "co-back", type: "button", onclick: () => (st.item ? ctx.levels.go(ME, "") : ctx.levels.up()) }, BACK);
+  const back = backButton({ cls: "co-back", onclick: () => (st.item ? ctx.levels.go(ME, "") : ctx.levels.up()) });
   const titleEl = h("b", { class: "co-title" }, "Columns");
   const pos = h("span", { class: "co-pos", "aria-live": "polite" });
   const addBtn = icon(PLUS, "Add a column or a panel", () => (st.item ? togglePick() : newBoard()), "co-add");
@@ -698,10 +699,10 @@ export function mount(box, ctx) {
     const shown = st.list.filter(it => !it.data.hidden), hidden = st.list.filter(it => it.data.hidden);
     return `[Sent from the Sleipnyr Columns board list: ${WHO}'s Columns boards (each a set of named columns of foldable panels), newest first.\n`
       + `Boards (id | title | size | last updated):\n${shown.map(line).join("\n") || "(none)"}\nArchived (hidden) boards:\n${hidden.map(line).join("\n") || "(none)"}\n`
-      + `This chat is the board list's own history; the list acts on your reply. Reply with ONE short sentence (at most 12 words, shown on a single line), `
+      + `This chat is the board list's own history; the list acts on your reply. ${ONE_SENTENCE}, `
       + `then one line per action, exactly:\n@open <board id>\n@new [title]   (a new board, opened at once; default title = today)\n@rename <board id> <title>\n`
       + `@hide <board id>   (archive; nothing is deleted)\n@unhide <board id>\n`
-      + `The list runs these lines itself and does not show them. Do not call tools for these lines; to show, point at or play something on screen, use the sleipnyr2 view_* tools (view_describe first). Use only ids listed above. Never delete anything.]`;
+      + `${runs("list")} Use only ids listed above. Never delete anything.]`;
   };
   const describe = async () => {
     if (!st.item) return describeList();
@@ -728,8 +729,8 @@ export function mount(box, ctx) {
       + `@memo <text>   (append to this board's hidden notes, shown to you at the top of every prompt from this board; for conventions ${WHO} agrees)\n@memo-clear\n`
       + `@rename-board <title>\n@back   (to the board list)\n`
       + `In notes, link files as [name](/k/files/<file id>) and pages as [name](https://...).\n`
-      + `This chat is this board's own history; the board acts on your reply (other boards are not affected). Reply with ONE short sentence (at most 12 words, shown on a single line), `
-      + `then one line per action. The view runs these lines itself and does not show them. Do not call tools for these lines; to show, point at or play something on screen, use the sleipnyr2 view_* tools (view_describe first). Never delete anything.\n`
+      + `This chat is this board's own history; the board acts on your reply (other boards are not affected). ${ONE_SENTENCE}, `
+      + `then one line per action. ${runs("view")} Never delete anything.\n`
       + `${cs || "(no columns)"}\nRecent threads (id | title):\n${threads || "(none)"}]`;
   };
   const run = async (name, args, text = "") => {

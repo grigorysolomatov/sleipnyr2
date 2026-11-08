@@ -29,9 +29,9 @@
 }
 .c-app { flex: 1; font-weight: 600; }
 .c-title { cursor: pointer; flex: 1; margin: 0; font-size: 1rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.c-back { border: none; font-size: 1.6rem; }
+.c-back { border: none; }
 /* up to the modality picker, on the thread list header: the same symbol as back */
-.c-up { border: none; font-size: 1.6rem; }
+.c-up { border: none; }
 
 /* ---------------------------------------------------------------- thread list */
 

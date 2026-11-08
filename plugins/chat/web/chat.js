@@ -11,6 +11,8 @@
 // Plain JavaScript (no conversion step), so the chat loads even if a
 // TypeScript file elsewhere breaks.
 import { render } from "/web/text.js";
+import { ONE_SENTENCE, runs } from "/web/hcp.js";
+import { BACK_SVG } from "/web/head.js";
 
 const API = "/p/chat";
 const IMAGE = /^image\//;
@@ -191,14 +193,14 @@ export async function mount(root, ctx) {
   const strip = h("section", { class: "c-strip", hidden: true, "aria-label": "Embedded chat" }, stripHead, stripLog, stripRow, tm);
   const side = h("nav", { class: "c-side" },
     h("header", { class: "c-bar" },
-      ctx.levels?.up ? h("button", { class: "c-btn c-up", type: "button", "data-tip": "All modalities", "aria-label": "All modalities",
-        onclick: () => ctx.levels.up() }, "‹") : null,
+      ctx.levels?.up ? h("button", { class: "c-btn k-back c-up", type: "button", "data-tip": "All modalities", "aria-label": "All modalities",
+        onclick: () => ctx.levels.up() }, svg(BACK_SVG)) : null,
       h("b", { class: "c-app" }, ctx.app.shortName),
       h("button", { class: "c-btn c-ic c-add", type: "button", "data-tip": "New thread (Alt+N)", "aria-label": "New thread",
         onclick: () => newThread() }, svg(PLUS))),
     list, strip);
   const title = h("h1", { class: "c-title", title: "Tap to rename", onclick: () => renameOpen() });
-  const back = h("button", { class: "c-btn c-back", "data-tip": "Threads (Alt+T)", "aria-label": "Threads", onclick: () => showList() }, "‹");
+  const back = h("button", { class: "c-btn k-back c-back", type: "button", "data-tip": "Threads (Alt+T)", "aria-label": "Threads", onclick: () => showList() }, svg(BACK_SVG));
   const log = h("div", { class: "c-log", role: "log", "aria-live": "polite" });
   const bar = h("header", { class: "c-bar" }, back, title);
   // "Jump to latest": shows while the scroller is more than a screen above its end
@@ -830,9 +832,9 @@ export async function mount(root, ctx) {
     return `[Sent from the Sleipnyr thread list (${st.threads.length} threads; ${shown.length} on screen, newest first). `
       + `This chat is the list's own history; the list acts on your reply. Threads on screen (id | title | last updated):\n${shown.map(line).join("\n")}\n`
       + `Archived (hidden) threads:\n${hidden.map(line).join("\n") || "(none)"}\n`
-      + `Reply with ONE short sentence (at most 12 words, shown on a single line), then one line per action, exactly:\n`
+      + `${ONE_SENTENCE}, then one line per action, exactly:\n`
       + COMMANDS.map(([n, a, d]) => `@${n} ${a}   (${d})`).join("\n")
-      + `\nThe list runs these lines itself and does not show them: do not call any tool or API for them. `
+      + `\n${runs("list")} `
       + `Selected thread: ${st.open || "(none)"}. To show something on ${who}'s screen (blink the selection or a thread, `
       + `highlight threads, unfold this reply) call the sleipnyr2 tools (chat_blink, chat_highlight, chat_reply_open) instead of a line. `
       + `Use only ids listed above. Never delete anything.]`;

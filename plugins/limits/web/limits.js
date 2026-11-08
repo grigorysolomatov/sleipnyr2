@@ -6,8 +6,8 @@
 // comes first (the main quota, thicker bar). 20 % or less = the attention
 // accent; a stale reading is dimmed. Refreshes every minute while visible.
 // The embedded chat underneath talks about the view; it has no actions.
+import { backButton } from "/web/head.js";
 const ME = "limits";
-const BACK = "‹";
 const LOW = 20, EVERY = 60000;
 const REFRESH = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 4v4.5h-4.5"/></svg>';
 
@@ -44,7 +44,7 @@ const ordered = ws => { const i = ws.findIndex(w => w.label === "7d"); return i 
 
 export function mount(box, ctx) {
   const st = { data: null, err: "", timer: 0 };
-  const back = h("button", { class: "rl-back", type: "button", "data-tip": "All modalities", "aria-label": "All modalities", onclick: () => ctx.levels.up() }, BACK);
+  const back = backButton({ cls: "rl-back", tip: "All modalities", onclick: () => ctx.levels.up() });
   const again = h("button", { class: "rl-ic", type: "button", "data-tip": "Check again now", "aria-label": "Check again now", onclick: () => load() }, svg(REFRESH));
   const body = h("div", { class: "rl-body" });
   box.append(h("header", { class: "rl-bar" }, back, h("b", { class: "rl-title" }, "Balance"), again), body);

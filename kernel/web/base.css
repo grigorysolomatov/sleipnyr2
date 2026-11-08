@@ -117,3 +117,15 @@ pre:has(> .tx-copy) > code { white-space: pre-wrap; overflow-wrap: anywhere; }
 .c-ic { display: inline-grid; place-items: center; padding: 0; width: 2.75rem; border: none; }
 .c-ic:hover { color: var(--text-muted); }
 .c-ic svg { width: 1.35rem; height: 1.35rem; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+/* the back chevron of every level header (kernel/web/head.js) */
+.k-back {
+  display: inline-grid; place-items: center; background: none; border: none; border-radius: var(--radius);
+  min-width: 2.5rem; min-height: 2.5rem; padding: 0 .6rem; cursor: pointer; line-height: 1;
+}
+.k-back:hover { color: var(--text-muted); }
+/* a list row's shared marks (views add their own padding/layout): thin left
+   bar, surface hover, pink bar = where you are */
+.k-row { color: var(--text); text-decoration: none; border-left: 3px solid transparent; }
+.k-row:hover { background: var(--surface); }
+.k-row.here { border-left-color: var(--accent-here); background: var(--surface); }
+.k-back svg { width: 1.35rem; height: 1.35rem; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }

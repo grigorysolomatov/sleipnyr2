@@ -119,6 +119,69 @@ own conversation; no = not yet.
 - Play a spoken reply again: yes (view_media_play on the message)
 - People threads: same chat actions as a thread; no agent takes part by default
 
+## @line reference (view conversations)
+
+A view's own conversation (HCP) turns reply lines `@verb args` into actions
+that the page runs. The prompt each view sends lists its verbs; this table
+is the same list in one place. A body (`@note`, `@edit`) is the following
+lines up to a line `@end`. Results come back to the agent in its next turn
+("ok ..." / "failed ...").
+
+Thread list (/):
+- `@open <thread id>`: open that thread
+- `@rename <thread id> <title>`: rename it
+- `@hide <thread id>` / `@unhide <thread id>`: archive or restore (nothing
+  is deleted)
+
+Modality picker (/m):
+- `@open <modality id>`: show that modality
+
+Projects (/m/projects):
+- `@open <project id>`: show that project's dashboard; `@back`: the list
+
+Theme (/m/theme):
+- `@set <token> <value>`: colours #rrggbb, radius and font size in px
+- `@reset <token>` / `@reset all`
+
+Task Tinder (/m/tinder):
+- `@suggest <board> | <tier> | <cost> | <title>`: a new suggestion card
+
+Columns, board list (/m/columns):
+- `@open`, `@new [title]`, `@rename <board id> <title>`, `@hide`, `@unhide`
+
+Columns, one board (/m/columns/<id>):
+- columns: `@column <title>`, `@rename-column <column> <title>`,
+  `@move-column <column> <position>`, `@remove-column <column>` (empty
+  only), `@show <column>`
+- panels: `@note <column> <title>` + body, `@edit <panel>` + body,
+  `@add <column> thread|threads|tinder|projects|file|url ...`,
+  `@move <panel> <column> [position]`, `@close <panel>`,
+  `@title <panel> <name>`, `@collapse` / `@fold`, `@expand` / `@unfold`
+- marks: `@focus <panel>`, `@highlight <panel or column> [why]`,
+  `@new <panel> [why]` / `@unnew <panel>`
+- decisions: `@suggest <column> [board=<kanban board>] <title>`,
+  `@decide <panel> [kanban board]` (Dismiss / Comment / Accept)
+- board: `@rename-board <title>`, `@memo <text>`, `@memo-clear`, `@back`
+
+Blackboards, list (/m/blackboards):
+- `@open`, `@new <title>`, `@rename <id> <title>`, `@hide`, `@unhide`
+
+Blackboards, one board (/m/blackboards/<id>):
+- windows: `@note <title>` + body, `@edit <window>` + body,
+  `@add thread|threads|tinder|projects|file|url ...`,
+  `@move <window> <x> <y> [<w> <h>]` (24 px grid), `@close <window>`,
+  `@title <window> <name>`, `@collapse` / `@fold`, `@expand` / `@unfold`
+- marks: `@focus <window>`, `@highlight <window> [why]`, `@unhighlight`,
+  `@new <window> [why]` / `@unnew <window>`
+- layout: `@zone <title> <x> <y> <w> <h>`, `@unzone <title>`,
+  `@arrange [zone]`, `@fit`
+- board: `@rename <title>`, `@memo [window] <text>`,
+  `@memo-clear [window]`, `@back`
+
+Columns windows are panels in columns (positions); Blackboards windows sit
+at x/y on a plane. The two vocabularies differ on purpose where the layouts
+differ (`@move`, `@zone`, `@arrange`).
+
 ## Not offered on purpose
 
 These are left out on purpose: the clipboard, downloads, the microphone and

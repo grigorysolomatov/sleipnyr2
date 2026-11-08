@@ -5,9 +5,10 @@
 // theme item shortly after (PATCH /p/theme/tokens, checked on the server),
 // and other open pages restyle through the kernel's "styles" event.
 // The embedded chat underneath talks to the view: @set / @reset lines.
+import { ONE_SENTENCE, runs } from "/web/hcp.js";
+import { backButton } from "/web/head.js";
 const ME = "theme";
 const API = "/p/theme";
-const BACK = "‹";
 const RESET = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4.5h4.5"/></svg>';
 
 // what each token means, in plain words; the order is the order on screen
@@ -54,7 +55,7 @@ export function mount(box, ctx) {
   const st = { tokens: {}, defaults: {}, pending: {}, timer: 0, saving: null, fields: new Map() };
   const rootStyle = document.documentElement.style;
 
-  const back = h("button", { class: "tm-back", type: "button", "data-tip": "All modalities", "aria-label": "All modalities", onclick: () => ctx.levels.up() }, BACK);
+  const back = backButton({ cls: "tm-back", tip: "All modalities", onclick: () => ctx.levels.up() });
   const resetAll = h("button", { class: "tm-ic tm-all", type: "button", "data-tip": "Reset everything to the default look", "aria-label": "Reset all", onclick: () => resetEverything() }, svg(RESET));
   const note = h("p", { class: "tm-note", "aria-live": "polite", hidden: true });
   const body = h("div", { class: "tm-body" });
@@ -173,10 +174,10 @@ export function mount(box, ctx) {
   // ------------------------------------------------------------ agent
   const describe = () => `[Sent from the Sleipnyr Theme modality: hand settings for the app's look. Current values (token | name | value | default):\n`
     + ROWS.map(([k, name]) => `- ${k} | ${name} | ${st.tokens[k]} | ${st.defaults[k]}`).join("\n")
-    + `\nThis chat is the Theme view's own history; the view acts on your reply. Reply with ONE short sentence (at most 12 words, `
-    + `shown on a single line), then one line per action, exactly:\n@set <token> <value>   (colours as #rrggbb; radius 0-24, font-size 12-24 as <n>px)\n`
+    + `\nThis chat is the Theme view's own history; the view acts on your reply. ${ONE_SENTENCE}, `
+    + `then one line per action, exactly:\n@set <token> <value>   (colours as #rrggbb; radius 0-24, font-size 12-24 as <n>px)\n`
     + `@reset <token>   (back to its default)\n@reset all   (the whole default look)\n`
-    + `The view runs these lines itself and does not show them. Do not call tools for these lines; to show, point at or play something on screen, use the sleipnyr2 view_* tools (view_describe first). Use only the tokens listed. Never delete anything.]`;
+    + `${runs("view")} Use only the tokens listed. Never delete anything.]`;
   const run = async (name, args) => {
     const [k, v] = String(args).trim().split(/\s+/);
     if (name === "reset" && k === "all") { await resetEverything(); return "reset all"; }

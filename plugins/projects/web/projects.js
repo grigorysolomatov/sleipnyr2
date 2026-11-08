@@ -5,7 +5,8 @@
 // own place = the open project (ctx.levels.go("projects", id)).
 // Its conversation sits in the embedded chat under the list (ctx.embed), and
 // the bar talks to it; replies may carry "@open <project id>" / "@back".
-const BACK = "‹";
+import { ONE_SENTENCE, runs } from "/web/hcp.js";
+import { backButton } from "/web/head.js";
 let PROJECTS = [], loaded = false; // filled from the config at mount
 const PANELS = ["Status", "Next steps", "Recent threads", "Files"];
 
@@ -24,7 +25,7 @@ export function mount(box, ctx) {
   const ME = "projects";
   const st = { open: "", last: "" };
   const title = h("b", { class: "pj-title" });
-  const back = h("button", { class: "pj-back", type: "button", onclick: () => (st.open ? ctx.levels.go(ME, "") : ctx.levels.up()) }, BACK);
+  const back = backButton({ cls: "pj-back", onclick: () => (st.open ? ctx.levels.go(ME, "") : ctx.levels.up()) });
   const body = h("div", { class: "pj-body" });
   box.append(h("header", { class: "pj-bar" }, back, title), body);
 
@@ -36,7 +37,7 @@ export function mount(box, ctx) {
     if (!p) {
       title.textContent = "Projects";
       body.replaceChildren(h("ul", { class: "pj-list", role: "list" }, PROJECTS.map(x => h("li", {},
-        h("a", { href: `/m/${ME}/${x.id}`, "data-id": x.id, "data-k-id": x.id, "data-k-kind": "project", class: x.id === st.last ? "here" : null, "data-tip": `Open ${x.title}`,
+        h("a", { href: `/m/${ME}/${x.id}`, "data-id": x.id, "data-k-id": x.id, "data-k-kind": "project", class: x.id === st.last ? "k-row here" : "k-row", "data-tip": `Open ${x.title}`,
           onclick: e => { e.preventDefault(); ctx.levels.go(ME, x.id); } },
           h("b", {}, x.title), h("small", {}, x.doc))))));
     } else {
@@ -54,9 +55,9 @@ export function mount(box, ctx) {
       + (p ? `On screen: the dashboard of project ${p.id} | ${p.title} (placeholder panels: ${PANELS.join(", ")}).`
         : `On screen: the project list (id | title | what it is):\n${PROJECTS.map(x => `- ${x.id} | ${x.title} | ${x.doc}`).join("\n")}`)
       + `\nThis chat is the Projects view's own history; the view acts on your reply. `
-      + `Reply with ONE short sentence (at most 12 words, shown on a single line), then one line per action, exactly:\n`
+      + `${ONE_SENTENCE}, then one line per action, exactly:\n`
       + `@open <project id>   (show that project's dashboard)\n@back   (back to the project list)\n`
-      + `The view runs these lines itself and does not show them. Do not call tools for these lines; to show, point at or play something on screen, use the sleipnyr2 view_* tools (view_describe first). Use only ids listed above. Never delete anything.]`;
+      + `${runs("view")} Use only ids listed above. Never delete anything.]`;
   };
   const run = async (name, args) => {
     const id = String(args).trim().split(/\s+/)[0];

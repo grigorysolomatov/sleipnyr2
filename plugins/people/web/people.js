@@ -9,8 +9,8 @@
 // button. The inbox address and its reachability sit under the list.
 // Mounted by the shell's levels: mount(box, ctx), /m/people[/<person id>].
 import { render } from "/web/text.js";
+import { backButton } from "/web/head.js";
 
-const BACK = "‹";
 const IMAGE = /^image\//;
 const INVITE = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3 19.5c.6-3.3 3-5.2 6-5.2s5.4 1.9 6 5.2"/><path d="M18 8v6M15 11h6"/></svg>';
 const ACCEPT = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16v3a2 2 0 0 0 0 4v3H4v-3a2 2 0 0 0 0-4z"/><path d="M9.5 12l1.8 1.8 3.4-3.6"/></svg>';
@@ -48,7 +48,7 @@ export function mount(box, ctx) {
   const ME = "people";
   const st = { open: "", last: "", me: null, msgs: [], files: new Map(), check: null, pop: "" };
   const title = h("b", { class: "pp-title" });
-  const back = h("button", { class: "pp-back", type: "button", onclick: () => (st.open ? ctx.levels.go(ME, "") : ctx.levels.up()) }, BACK);
+  const back = backButton({ cls: "pp-back", onclick: () => (st.open ? ctx.levels.go(ME, "") : ctx.levels.up()) });
   const inviteBtn = h("button", { class: "pp-ic", type: "button", "aria-haspopup": "dialog", "data-tip": "Invite someone: a code to send them", "aria-label": "Invite someone",
     onclick: () => toggle("invite") }, svg(INVITE));
   const acceptBtn = h("button", { class: "pp-ic", type: "button", "aria-haspopup": "dialog", "data-tip": "Accept an invite code someone sent you", "aria-label": "Accept invite",
@@ -199,7 +199,7 @@ export function mount(box, ctx) {
     back.dataset.tip = "All modalities"; back.setAttribute("aria-label", "All modalities");
     const me = st.me;
     if (!me) { body.replaceChildren(h("p", { class: "pp-note" }, "Loading…")); return; }
-    const rows = me.peers.map(p => h("li", {}, h("a", { href: `/m/${ME}/${p.id}`, class: p.id === st.last ? "here" : null, "data-tip": `Chat with ${p.name} · safety code ${p.safety}`,
+    const rows = me.peers.map(p => h("li", {}, h("a", { href: `/m/${ME}/${p.id}`, class: p.id === st.last ? "k-row here" : "k-row", "data-tip": `Chat with ${p.name} · safety code ${p.safety}`,
       onclick: e => { e.preventDefault(); ctx.levels.go(ME, p.id); } },
       h("span", { class: "pp-row" }, h("b", {}, p.name), h("small", {}, p.last ? (p.last.dir === "out" ? "You: " : "") + p.last.text.replace(/\s+/g, " ").slice(0, 80) : "No messages yet")),
       h("time", {}, p.waiting ? `${p.waiting} waiting` : p.last ? when(p.last.sent) : ""))));
