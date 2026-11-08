@@ -49,6 +49,7 @@ export interface Manifest {
     // extension exporting extend(host, ctx), host = what the home plugin's mount() returned
     entry?: string; // e.g. "web/chat.ts"
     styles?: string[]; // stylesheet paths under /p/<id>/ the shell loads first, e.g. "web/chat.css"
+    restyleOn?: string[]; // item types whose change makes every open page reload these styles (the theme)
   };
 }
 

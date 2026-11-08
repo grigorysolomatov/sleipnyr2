@@ -107,7 +107,9 @@ function darkFrame(fr) {
   try {
     const d = fr.contentDocument; if (!d || d.getElementById("k-dark")) return;
     const s = d.createElement("style"); s.id = "k-dark";
-    s.textContent = ":root{color-scheme:dark;scrollbar-color:#444 #000;background:#000!important}body{background:#000!important;margin:0}body>img:only-child{display:block;max-width:100%;height:auto;margin:0 auto;background:#000!important}";
+    const tok = (n, f) => getComputedStyle(document.documentElement).getPropertyValue(n).trim() || f; // the app's theme
+    const bg = tok("--bg", "#000"), line = tok("--line", "#444");
+    s.textContent = `:root{color-scheme:dark;scrollbar-color:${line} ${bg};background:${bg}!important}body{background:${bg}!important;margin:0}body>img:only-child{display:block;max-width:100%;height:auto;margin:0 auto;background:${bg}!important}`;
     (d.head || d.documentElement).appendChild(s);
   } catch { /* other origin: leave it */ }
 }

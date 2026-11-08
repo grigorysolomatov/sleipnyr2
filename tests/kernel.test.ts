@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { createApp, type Config } from "../kernel/server.ts";
 import { content, toEvent } from "../plugins/agent-hermes/server.ts";
 import { extractMedia, titleFrom } from "../plugins/chat/server.ts";
-import { css } from "../plugins/theme/server.ts";
+import { clean, css } from "../plugins/theme/server.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "sleipnyr2-test-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -86,6 +86,31 @@ test("theme css uses only safe tokens", () => {
   const out = css({ bg: "#111", text: "red; } body { x" } as any);
   expect(out).toContain("--bg: #111;");
   expect(out).not.toContain("body {");
+});
+
+test("theme values are checked: hex colours and pixel sizes in range only", () => {
+  expect(clean("accent-here", "#F08")).toBe("#ff0088");
+  expect(clean("accent-here", "#12abef")).toBe("#12abef");
+  expect(clean("accent-here", "red")).toBeNull();
+  expect(clean("accent-here", "#123; } body {")).toBeNull();
+  expect(clean("radius", "12px")).toBe("12px");
+  expect(clean("radius", "99px")).toBeNull();
+  expect(clean("font", "#ffffff")).toBeNull(); // fonts are not editable here
+});
+
+test("theme tokens: a hand change saves to the active theme, null resets, bad values are refused", async () => {
+  const before = (await call("GET", "/p/theme/tokens")).body;
+  expect(before.tokens["accent-here"]).toBe("#ff0088");
+  const up = await call("PATCH", "/p/theme/tokens", { tokens: { "accent-here": "#00aaff", radius: "4px" } });
+  expect(up.status).toBe(200);
+  expect(up.body.id).toBe(before.id); // the same theme item, never a delete
+  expect(await (await app.fetch(new Request("http://x/p/theme/theme.css"))).text()).toContain("--accent-here: #00aaff;");
+  for (const bad of [{ "accent-here": "url(x)" }, { font: "x" }, { radius: "100px" }, { "accent-here": "#00ff00", link: "nope" }])
+    expect((await call("PATCH", "/p/theme/tokens", { tokens: bad })).status).toBe(400);
+  expect((await call("GET", "/p/theme/tokens")).body.tokens["accent-here"]).toBe("#00aaff"); // all or nothing
+  const reset = await call("PATCH", "/p/theme/tokens", { tokens: { "accent-here": null, radius: null } });
+  expect(reset.body.tokens["accent-here"]).toBe("#ff0088");
+  expect(reset.body.tokens.radius).toBe("8px");
 });
 
 test("chat: a thread with no agent reports an error, not a hang", async () => {

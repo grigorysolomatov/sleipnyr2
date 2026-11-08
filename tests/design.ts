@@ -39,6 +39,7 @@ const STATES: State[] = [
   { name: "columns-add-menu", path: "/m/columns", ready: ".co-add", act: click(".co-add"), popover: ".co-pick" },
   { name: "blackboards", path: "/m/blackboards", ready: "[data-k-kind]" },
   { name: "blackboard", path: `/m/blackboards/${board}`, ready: ".ss-win" },
+  { name: "theme", path: "/m/theme", ready: ".tm-row" },
 ];
 
 // the in-page checks; returns findings as strings

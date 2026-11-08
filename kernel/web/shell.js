@@ -9,6 +9,7 @@
 //   upload(file)     -> file item            POST /k/files
 //   fileUrl(id)                              URL of a file item's bytes
 //   on(topic, fn)    -> off()                live events (one shared EventSource)
+//   restyle(plugin)  -> Promise              reload that plugin's stylesheets (a theme change)
 //   onReconnect(fn)                          called after the event stream reopens
 //   address(id), go(id)                      an item's permanent address /i/<id>
 //   bar                                      the modality bar (web/bar.js): views
@@ -111,6 +112,23 @@ const loadCss = href => new Promise(ok => {
   document.head.appendChild(l);
 });
 
+// reload one plugin's stylesheets in place: the new sheet loads first, then
+// the old one goes, so the page never flashes unstyled. Plugins listing item
+// types in web.restyleOn get this on every change of such an item (a theme
+// saved on another page restyles this one without a reload).
+const sheetOf = (p, s) => `/p/${p}/${s}`;
+async function restyle(plugin) {
+  const old = [...document.querySelectorAll('link[rel="stylesheet"]')].filter(l => new URL(l.href).pathname.startsWith(`/p/${plugin}/`));
+  await Promise.all(old.map(l => new Promise(ok => {
+    const n = document.createElement("link"); n.rel = "stylesheet";
+    const u = new URL(l.href); u.searchParams.set("v", Date.now().toString(36)); n.href = u.pathname + u.search;
+    n.onload = n.onerror = () => { l.remove(); ok(); };
+    l.after(n);
+  })));
+  const bg = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();
+  if (bg) document.querySelector('meta[name="theme-color"]')?.setAttribute("content", bg);
+}
+
 const svgEl = s => { const t = document.createElement("template"); t.innerHTML = String(s || "").trim(); const n = t.content.firstElementChild; return n?.tagName === "svg" ? n : null; };
 function el(tag, attrs = {}, ...kids) {
   const e = document.createElement(tag);
@@ -206,7 +224,7 @@ function picker(ctx, box, mods, lv) {
 async function boot() {
   const info = await api("/k/plugins");
   document.title = info.app.name;
-  await Promise.all(info.plugins.flatMap(p => (p.web?.styles || []).map(s => loadCss(`/p/${p.id}/${s}`))));
+  await Promise.all(info.plugins.flatMap(p => (p.web?.styles || []).map(s => loadCss(sheetOf(p.id, s)))));
   const home = info.plugins.find(p => p.id === info.app.home && p.web?.entry);
   if (!home) throw new Error(`home plugin "${info.app.home}" has no web entry`);
   const mod = await import(`/p/${home.id}/${home.web.entry}`);
@@ -219,12 +237,14 @@ async function boot() {
   tooltips(root);
   const ctx = {
     app: { ...info.app, agentName: info.app.agentName || "Agent" }, user: info.user, plugins: info.plugins, api, upload, on,
-    onReconnect,
+    onReconnect, restyle,
     fileUrl: id => `/k/files/${encodeURIComponent(id)}`,
     address: id => `/i/${encodeURIComponent(id)}`,
     go: id => history.pushState({}, "", `/i/${encodeURIComponent(id)}`),
     route: () => decodeURIComponent((location.pathname.match(/^\/i\/(.+)$/) || [])[1] || ""),
   };
+  const restyleOn = new Map(info.plugins.flatMap(p => (p.web?.restyleOn || []).map(t => [t, p.id])));
+  if (restyleOn.size) on("item", ({ item }) => { const p = restyleOn.get(item?.type); if (p) restyle(p); });
   ctx.bar = createBar(ctx, root);
   root.append(ctx.bar.el);
   if (framed) { root.classList.add("k-framed"); window.__kSend = body => ctx.bar.deliver(body); }
