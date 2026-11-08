@@ -1,4 +1,10 @@
-// Rate limits: what is left of each AI subscription, read only.
+// Balance (plugin id limits): money balances and what is left of each AI
+// subscription, read only.
+// Config plugins.limits.balances = [{id, name, file}], each file a balance
+// JSON written by a fetcher (schema_version 1, no secrets):
+//   {fetched_at, status: ok|stale|unavailable, balance: {amount, currency},
+//    facts: [{label, value}]}
+// -> balances: [{id, name, amount, currency, facts, updated_at, stale?, error?}]
 // Config (plugins.limits): sources = [{id, name, file}], each file a usage
 // JSON written by a fetcher on this machine (schema_version 1):
 //   {plan, fetched_at, status: ok|stale|unavailable,
@@ -55,18 +61,38 @@ export function provider(s: { id: string; name: string }, d: any, now: number) {
   return base;
 }
 
-export function limits(sources: Source[], read: (f: string) => string, now = Math.floor(Date.now() / 1000)) {
+const BAL_STALE_S = 30 * 60; // balance fetchers run every 10 min
+
+/** one money balance from its parsed file (d), at time now (unix s) */
+export function balance(s: { id: string; name: string }, d: any, now: number) {
+  const base: any = { id: s.id, name: s.name, amount: null, currency: null, facts: [], updated_at: null };
+  if (!d || typeof d !== "object" || Array.isArray(d)) return { ...base, error: "no data" };
+  base.updated_at = num(d.fetched_at);
+  base.amount = num(d.balance?.amount);
+  base.currency = typeof d.balance?.currency === "string" ? d.balance.currency.slice(0, 8) : null;
+  base.facts = (Array.isArray(d.facts) ? d.facts : []).flatMap((f: any) =>
+    f && typeof f.label === "string" && (num(f.value) != null || typeof f.value === "string")
+      ? [{ label: f.label.slice(0, 60), value: typeof f.value === "string" ? f.value.slice(0, 60) : f.value }] : []);
+  if (d.status === "unavailable" || base.amount == null) return { ...base, error: "no data" };
+  if (d.status === "stale" || (base.updated_at != null && now - base.updated_at > BAL_STALE_S)) base.stale = true;
+  return base;
+}
+
+const readJson = (read: (f: string) => string, f: string) => { try { return JSON.parse(read(f)); } catch { return null; } };
+
+export function limits(sources: Source[], read: (f: string) => string, now = Math.floor(Date.now() / 1000), money: Source[] = []) {
   const providers = sources.map(s => {
     let d: unknown = null;
     try { d = JSON.parse(read(s.file)); } catch { d = null; }
     return provider(s, d, now);
   });
-  return { providers, fetched_at: now };
+  const balances = money.map(s => balance(s, readJson(read, s.file), now));
+  return { balances, providers, fetched_at: now };
 }
 
 const plugin: ServerPlugin = {
   routes: k => ({
-    "GET /limits": () => Response.json(limits(sourcesOf(k.config.sources), f => readFileSync(f, "utf8")),
+    "GET /limits": () => Response.json(limits(sourcesOf(k.config.sources), f => readFileSync(f, "utf8"), undefined, sourcesOf(k.config.balances)),
       { headers: { "cache-control": "no-store" } }),
   }),
 };

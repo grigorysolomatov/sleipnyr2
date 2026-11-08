@@ -1,17 +1,17 @@
 {
   "id": "limits",
-  "name": "Rate limits",
+  "name": "Balance",
   "version": "0.1.0",
   "contract": 1,
-  "doc": "How much of each AI subscription's rate limits is left: one row per configured source (a usage JSON file written by a fetcher on this machine), remaining percent per window and when it resets. Read only.",
+  "doc": "How much balance is left on each platform: money balances (plugins.limits.balances, e.g. Vast.ai credit) and each AI subscription's rate limits (plugins.limits.sources). Every source is a JSON file written by a fetcher on this machine; the view never calls a provider. Read only.",
   "permissions": {
     "read": [],
     "write": [],
     "network": []
   },
   "modality": {
-    "title": "Rate limits",
-    "doc": "What is left of each AI subscription and when it resets",
+    "title": "Balance",
+    "doc": "Credit on each platform and what is left of each AI subscription",
     "icon": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M3.5 15.5a8.5 8.5 0 0 1 17 0\"/><path d=\"M12 15.5l4-5\"/><circle cx=\"12\" cy=\"15.5\" r=\"1.2\"/><path d=\"M3.5 19.5h17\"/></svg>"
   },
   "web": {
