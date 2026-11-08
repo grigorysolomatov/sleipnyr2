@@ -579,6 +579,7 @@ export async function mount(root, ctx) {
       recent.length ? head("Recent threads") : null,
       ...recent.map(t => row(t, t.data.title || "Thread", dayTime(t.updated))));
     placeMenu();
+    tm.scrollTop = 0;
   }
   function closeMenu() { menuToken++; tm.hidden = true; }
   // hangs under the header; above it when the strip leaves no room below
