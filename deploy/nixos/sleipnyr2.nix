@@ -85,6 +85,8 @@ in
       wants = [ "sleipnyr2-transcribe.service" "sleipnyr2-speak.service" ];
       unitConfig.ConditionPathExists = "${cfg.stateDir}/releases/current/kernel/server.ts";
       environment.SLEIPNYR2_CONFIG = "${appConfig}";
+      # voice uploads get fresh timestamps (kernel/server.ts fixAudio)
+      environment.SLEIPNYR2_FFMPEG = "${pkgs.ffmpeg-headless}/bin/ffmpeg";
       serviceConfig = hardening // {
         ExecStart = "${pkgs.bun}/bin/bun ${cfg.stateDir}/releases/current/kernel/server.ts";
         WorkingDirectory = cfg.stateDir;

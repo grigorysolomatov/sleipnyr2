@@ -4,7 +4,7 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createApp, type Config } from "../kernel/server.ts";
+import { createApp, fixAudio, type Config } from "../kernel/server.ts";
 import { content, toEvent } from "../plugins/agent-hermes/server.ts";
 import { extractMedia, titleFrom } from "../plugins/chat/server.ts";
 import { clean, css } from "../plugins/theme/server.ts";
@@ -374,4 +374,12 @@ test("actions: a call is relayed to open pages, which report back; stop is broad
   // no page open: the agent is told nothing ran
   const none = await mcp({ jsonrpc: "2.0", id: 6, method: "tools/call", params: { name: "chat_reply_open", arguments: {} } }, KEY);
   expect(none.body.result.content[0].text).toContain("no Sleipnyr page is open");
+});
+
+test("fixAudio keeps non-audio and undecodable bytes unchanged", async () => {
+  const txt = new TextEncoder().encode("hello");
+  expect((await fixAudio(txt, "text/plain")).bytes).toBe(txt);
+  const bad = await fixAudio(txt, "audio/webm");
+  expect(bad.bytes).toBe(txt);
+  expect(bad.mime).toBe("audio/webm");
 });

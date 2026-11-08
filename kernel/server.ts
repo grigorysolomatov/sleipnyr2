@@ -2,7 +2,8 @@
 // HTTP API and each plugin's routes and web files. See README.md.
 //
 //   bun kernel/server.ts [config.json]      (or SLEIPNYR2_CONFIG=...)
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { basename, extname, join, normalize, resolve } from "node:path";
 import {
   CONTRACT_VERSION, ITEM_TOPIC,
@@ -22,6 +23,27 @@ export interface Config {
   user: { id: string; name: string };
   plugins: Record<string, Record<string, unknown>>; // enabled plugins and their settings
   actions?: ActionsConfig; // which agents may call the plugins' declared actions (kernel/actions.ts)
+}
+
+/** Voice recordings from some phones (Android Chrome WebM) carry a timestamp jump after the first
+ * packet, so players show a duration many times too long. Re-encode them with fresh timestamps.
+ * Needs ffmpeg (SLEIPNYR2_FFMPEG, or "ffmpeg" on PATH); without it, or on any failure, the
+ * original bytes are kept. */
+export async function fixAudio(bytes: Uint8Array, mime: string): Promise<{ bytes: Uint8Array; mime: string }> {
+  if (!/^audio\/(webm|ogg)\b/i.test(mime)) return { bytes, mime };
+  const dir = mkdtempSync(join(tmpdir(), "s2audio-"));
+  try {
+    const inp = join(dir, "in"), out = join(dir, "out.webm");
+    writeFileSync(inp, bytes);
+    const p = Bun.spawn([process.env.SLEIPNYR2_FFMPEG || "ffmpeg", "-v", "error", "-y", "-i", inp, "-vn",
+      "-af", "asetpts=N/SR/TB", "-c:a", "libopus", "-b:a", "32k", "-f", "webm", out], { stdout: "ignore", stderr: "ignore" });
+    const timer = setTimeout(() => p.kill(), 120_000);
+    const code = await p.exited; clearTimeout(timer);
+    if (code !== 0 || !existsSync(out)) return { bytes, mime };
+    const fixed = new Uint8Array(readFileSync(out));
+    return fixed.length ? { bytes: fixed, mime: "audio/webm" } : { bytes, mime };
+  } catch { return { bytes, mime }; }
+  finally { rmSync(dir, { recursive: true, force: true }); }
 }
 
 export function loadConfig(path: string): Config {
@@ -209,7 +231,8 @@ export async function createApp(config: Config) {
     }
     if (what === "files" && !id && m === "POST") {
       const name = url.searchParams.get("name") || "file", mime = req.headers.get("content-type") || "application/octet-stream";
-      return json(userFiles.put(name, mime, new Uint8Array(await req.arrayBuffer())), 201);
+      const fixed = await fixAudio(new Uint8Array(await req.arrayBuffer()), mime);
+      return json(userFiles.put(name, fixed.mime, fixed.bytes as Uint8Array<ArrayBuffer>), 201);
     }
     if (what === "files" && id && m === "GET") {
       const it = userItems.get<{ mime: string; name: string }>(id), bytes = await userFiles.read(id);
