@@ -175,6 +175,8 @@ function createLevels(ctx, view, home, mods) {
     await l.mounted;
     if (level !== id) return;
     for (const fn of hooks) try { fn(id, parse().sub); } catch (e) { console.error(e); }
+    // the bar belongs to the shell: if a view's redraw ever took it out, put it back
+    if (!framed && ctx.bar.el.parentElement !== root) { console.error("modality bar was detached; restored"); root.append(ctx.bar.el); }
     ctx.bar.refresh();
   }
   addEventListener("popstate", () => { const { id } = parse(); show(id, false); });

@@ -14,7 +14,9 @@ body {
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior: none;
 }
-#app { height: 100dvh; display: flex; flex-direction: column; }
+/* overflow hidden: the page itself never scrolls, so a view that grows too
+   tall (a short screen, the phone keyboard) can never push the bar away */
+#app { height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
 /* a window on a Blackboard or Columns panel (?frame=1): the parent page's bar talks to it */
 .k-framed > .mb { display: none; }
 /* the view box (the home plugin mounts here) above the shared modality bar */

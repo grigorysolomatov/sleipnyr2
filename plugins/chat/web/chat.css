@@ -105,7 +105,7 @@ body:has(.c-shell:not(.thread-open) .c-strip:not([hidden])) { --bar-line: var(--
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 var(--log-fade)); mask-image: linear-gradient(to bottom, transparent 0, #000 var(--log-fade));
 }
 .c-strip-msgs { display: flex; flex-direction: column; gap: .9rem; }
-.c-strip.open { height: var(--strip-h, var(--strip-max)); }
+.c-strip.open { height: var(--strip-h, var(--strip-max)); max-height: calc(100% - 6rem); /* a saved height never outgrows a shorter screen */ }
 .c-strip.open .c-strip-head { display: flex; border-bottom: var(--rule); /* on the head: the log's fade mask would hide its own top border */ }
 .c-strip.open .c-strip-log { display: flex; flex: 1; min-height: 0; }
 .c-strip.open .c-strip-row { display: none; }

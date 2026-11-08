@@ -36,8 +36,10 @@
      typing     X, text field, send
      recording  X, level bars + timer (centred), send
    The send feedback is the message sliding in; the bar itself does not flash. */
+/* flex none + own fill + above the view: the bar never shrinks, and a view
+   that overflows slides under it instead of showing through */
 .mb {
-  position: relative; border-top: var(--bar-line);
+  position: relative; z-index: 2; flex: none; background: var(--bg); border-top: var(--bar-line);
   padding: .5rem calc(.5rem + var(--side)) max(.5rem, env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: .4rem;
 }
 .mb.busy { opacity: .6; }
