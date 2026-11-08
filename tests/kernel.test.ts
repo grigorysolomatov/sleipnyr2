@@ -63,6 +63,15 @@ test("files round-trip as items", async () => {
   expect(f.body.data).toMatchObject({ name: "x.png", mime: "image/png", size: 7 });
   const r = await app.fetch(new Request(`http://x/k/files/${f.body.id}`));
   expect(new Uint8Array(await r.arrayBuffer())).toEqual(bytes);
+  expect(r.headers.get("accept-ranges")).toBe("bytes");
+  // players seek by byte ranges
+  const part = await app.fetch(new Request(`http://x/k/files/${f.body.id}`, { headers: { range: "bytes=2-4" } }));
+  expect(part.status).toBe(206);
+  expect(part.headers.get("content-range")).toBe("bytes 2-4/7");
+  expect(new Uint8Array(await part.arrayBuffer())).toEqual(bytes.slice(2, 5));
+  const tail = await app.fetch(new Request(`http://x/k/files/${f.body.id}`, { headers: { range: "bytes=-2" } }));
+  expect(new Uint8Array(await tail.arrayBuffer())).toEqual(bytes.slice(5));
+  expect((await app.fetch(new Request(`http://x/k/files/${f.body.id}`, { headers: { range: "bytes=9-" } }))).status).toBe(416);
 });
 
 test("bad item types are refused", async () => {
@@ -354,7 +363,12 @@ test("actions: arguments are typed and bounded; there is no code argument", () =
 
 test("view actions: the kernel's generic tools are declared once, typed and need a grant on \"view\"", async () => {
   const names = [...actApp.actions.tools.keys()].filter(n => n.startsWith("view_"));
-  expect(names.sort()).toEqual(["view_animate", "view_describe", "view_focus", "view_mark", "view_order", "view_scroll_to"]);
+  expect(names.sort()).toEqual(["view_animate", "view_back", "view_describe", "view_focus", "view_fold", "view_mark",
+    "view_media_pause", "view_media_play", "view_media_seek", "view_open", "view_order", "view_scroll_to"]);
+  const play = actApp.actions.tools.get("view_media_play")!.decl;
+  expect("error" in checkArgs(play, { target: "m_1", from_s: 5, to_s: 10 })).toBe(false);
+  expect("error" in checkArgs(play, { target: "m_1\"]" })).toBe(true);
+  expect("error" in checkArgs(play, { target: "m_1", to_s: -3 })).toBe(true);
   // the assistant holds chat only: no view tools listed, a call is refused
   const list = await mcp({ jsonrpc: "2.0", id: 7, method: "tools/list" }, KEY);
   expect(list.body.result.tools.some((t: any) => t.name.startsWith("view_"))).toBe(false);
@@ -387,6 +401,19 @@ test("actions: a call is relayed to open pages, which report back; stop is broad
   await actApp.fetch(new Request("http://x/k/actions/stop", { method: "POST", body: "{}" }));
   expect(seen.at(-1)).toEqual({ stop: true });
   off();
+  // an answering action waits for the page's word on what happened; that word is not another page
+  const off2 = actApp.events.subscribe("action", m => {
+    const run = (m as any).run; if (!run) return;
+    const post = (b: object) => actApp.fetch(new Request(`http://x/k/actions/${run.id}`, { method: "POST", body: JSON.stringify(b) }));
+    post({ status: "running" }).then(() => Bun.sleep(400)).then(() => post({ status: "running", note: "waiting for a tap", say: true }));
+  });
+  const app2 = actApp as any, tool = app2.actions.tools.get("chat_reply_open");
+  tool.decl.answers = true;
+  const w = await mcp({ jsonrpc: "2.0", id: 9, method: "tools/call", params: { name: "chat_reply_open", arguments: {} } }, KEY);
+  tool.decl.answers = false; off2();
+  expect(w.body.result.content[0].text).toContain("waiting for a tap");
+  const last = (await (await actApp.fetch(new Request("http://x/k/actions?limit=1"))).json()) as any[];
+  expect(last[0].data).toMatchObject({ status: "running", pages: 1, note: "waiting for a tap" });
   // no page open: the agent is told nothing ran
   const none = await mcp({ jsonrpc: "2.0", id: 6, method: "tools/call", params: { name: "chat_reply_open", arguments: {} } }, KEY);
   expect(none.body.result.content[0].text).toContain("no Sleipnyr page is open");

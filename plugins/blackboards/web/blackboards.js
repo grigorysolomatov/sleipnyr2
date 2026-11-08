@@ -1024,6 +1024,11 @@ export function mount(box, ctx) {
   ctx.actions?.view?.(ME, {
     scrollTo: id => { if (!find(id)) return false; focusWin(id); return true; },
     focus: id => { if (!find(id)) return false; focusWin(id); return true; },
+    fold: (id, folded) => {
+      const w = find(id); if (!w) return false;
+      if (!!w.collapsed !== folded) setCollapsed(id, folded, true);
+      return `${folded ? "folded" : "unfolded"} window ${id} "${winTitle(w)}"`;
+    },
     order: ids => {
       const ws = ids.map(id => { const w = find(id); if (!w) throw new Error(`no window ${id}`); return w; });
       const from = new Map(ws.map(w => [w.id, geo(w)]));

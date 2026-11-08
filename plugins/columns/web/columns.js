@@ -737,6 +737,11 @@ export function mount(box, ctx) {
   ctx.actions?.view?.(ME, {
     scrollTo: id => { if (!st.item || (!findP(id) && !findC(id))) return false; reveal(id); return true; },
     focus: id => { if (!st.item || (!findP(id) && !findC(id))) return false; reveal(id); return true; },
+    fold: (id, folded) => {
+      const p = st.item && findP(id); if (!p) return false;
+      if (!!p.collapsed !== folded) setCollapsed(id, folded, true);
+      return `${folded ? "folded" : "unfolded"} panel ${id} "${pTitle(p)}"`;
+    },
     order: (ids, { into, at }) => {
       if (!st.item) throw new Error("open a board first");
       const ps = ids.map(needP);

@@ -60,7 +60,8 @@ setInterval(() => { for (const e of document.querySelectorAll(".c-el")) e.textCo
 function fixDuration(a) {
   a.addEventListener("loadedmetadata", () => {
     if (a.duration !== Infinity && !Number.isNaN(a.duration)) return;
-    const back = () => { a.removeEventListener("durationchange", back); a.currentTime = 0; };
+    a.dataset.fixing = ""; // media actions wait until the length is known and the jump back done
+    const back = () => { a.removeEventListener("durationchange", back); a.currentTime = 0; delete a.dataset.fixing; };
     a.addEventListener("durationchange", back);
     a.currentTime = 1e101;
   }, { once: true });
@@ -294,10 +295,20 @@ export async function mount(root, ctx) {
     return Math.max(0, Math.min(log.scrollHeight, end) - log.clientHeight);
   }
   const nearBottom = () => logEnd() - log.scrollTop < 80;
+  // A redraw builds a message anew; a player that has started (playing, paused
+  // mid-way) moves into the new copy so sound and position carry on.
+  function keepPlayers(old, el) {
+    if (!old) return;
+    const was = [...old.querySelectorAll("audio")].filter(a => a.currentTime > 0 || !a.paused);
+    if (!was.length) return;
+    const now = [...el.querySelectorAll("audio")];
+    for (const a of was) { const n = now.find(x => x.src === a.src); if (n) { n.replaceWith(a); now.splice(now.indexOf(n), 1); } }
+  }
 
   function drawLog(toBottom) {
     const stick = toBottom || nearBottom();
-    log.replaceChildren(...[...st.msgs.values()].filter(m => !heldBack(m)).map(messageEl));
+    const olds = new Map([...log.querySelectorAll(".c-msg")].map(e => [e.id, e]));
+    log.replaceChildren(...[...st.msgs.values()].filter(m => !heldBack(m)).map(m => { const el = messageEl(m); keepPlayers(olds.get(m.id), el); return el; }));
     if (!st.msgs.size) log.append(h("p", { class: "c-hello" }, st.open ? "New thread. Write, talk or paste a screenshot." : "Pick a thread or start a new one."));
     if (stick) log.scrollTop = logEnd();
     syncJump();
@@ -452,6 +463,7 @@ export async function mount(root, ctx) {
     if (rise) el.style.setProperty("--rise", rise); // a redraw mid-rise keeps its start
     const lift = !old && stick && el.classList.contains("c-arrive"), before = lift ? tops() : null;
     const grow = old ? growFrom(old, el) : null;
+    keepPlayers(old, el);
     if (old) old.replaceWith(el);
     else { log.querySelector(".c-hello")?.remove(); log.append(el); }
     if (grow) grow(stick);
@@ -631,7 +643,8 @@ export async function mount(root, ctx) {
     // as in a thread: the reply that only waits for a transcript stays out until the transcript is there
     const all = [...st.histMsgs.values()], hearing = all.some(u => u.data.role === "user" && u.data.status === "transcribing");
     const shown = all.filter(m => !(hearing && m.data.role === "agent" && m.data.status === "queued" && !st.histLive.get(m.id)?.progress));
-    stripMsgs.replaceChildren(...shown.map(m => { const el = messageEl(m); el.removeAttribute("id"); return el; }));
+    const olds = new Map([...stripMsgs.querySelectorAll(".c-msg")].map(e => [e.dataset.id, e]));
+    stripMsgs.replaceChildren(...shown.map(m => { const el = messageEl(m); el.removeAttribute("id"); keepPlayers(olds.get(m.id), el); return el; }));
     if (!st.histMsgs.size) stripMsgs.append(h("p", { class: "c-hello" }, "Nothing asked yet."));
     if (end) stripLog.scrollTop = stripLog.scrollHeight;
     syncStripJump();
@@ -850,6 +863,16 @@ export async function mount(root, ctx) {
   // What the manifest's declared actions do on this page (kernel/web/actions.js
   // relays a checked call; the stop control or a reload ends an effect).
   const fx = ctx.actions;
+  // the embedded chat under every view: view_fold target "strip"
+  fx?.view?.("*", {
+    has: id => id === "strip" && !strip.hidden && !!st.hist,
+    extra: () => !strip.hidden && st.hist ? [{ id: "strip", kind: "embedded chat", label: strip.classList.contains("open") ? "unfolded" : "folded to one line" }] : [],
+    fold: (id, folded) => {
+      if (id !== "strip") return false;
+      if (strip.hidden || !st.hist) throw new Error("this view shows no embedded chat");
+      openStrip(!folded); return `${folded ? "folded" : "unfolded"} the embedded chat`;
+    },
+  });
   const rowSel = id => `.c-threads a[data-id="${CSS.escape(id)}"]`;
   fx?.handle("chat", "blink", async ({ target, times, interval_ms, colours }, signal) => {
     const id = target === "selection" ? st.open : target === "list" ? null : target;

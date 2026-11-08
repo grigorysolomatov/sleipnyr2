@@ -37,7 +37,7 @@ export function itemList({ word = "item", agent = "the agent", href, open, title
     const shown = newest.filter(it => !it.data.hidden), hidden = newest.filter(it => it.data.hidden);
     el.replaceChildren(...[...shown.map(it => row(it, here)),
       shown.length ? null : h("li", { class: "k-it-empty" }, `No ${word}s yet. Tap + for a new one.`),
-      hidden.length ? h("li", { class: "k-it-arch" }, h("details", {},
+      hidden.length ? h("li", { class: "k-it-arch" }, h("details", { "data-k-id": "archived", "data-k-kind": "section", "data-k-label": "Archived" },
         h("summary", { "data-tip": `Hidden ${word}s; ask ${agent} to bring one back` }, `Archived (${hidden.length})`),
         h("ul", { class: "k-items", role: "list" }, hidden.map(it => row(it, here))))) : null].filter(Boolean));
   }

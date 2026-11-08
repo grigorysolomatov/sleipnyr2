@@ -237,8 +237,16 @@ export async function createApp(config: Config) {
     if (what === "files" && id && m === "GET") {
       const it = userItems.get<{ mime: string; name: string }>(id), bytes = await userFiles.read(id);
       if (!it || !bytes) return json({ error: "not found" }, 404);
-      return new Response(bytes, { headers: { "content-type": it.data.mime, "cache-control": "private, max-age=31536000, immutable",
-        "content-disposition": `inline; filename="${encodeURIComponent(it.data.name)}"` } });
+      const headers: Record<string, string> = { "content-type": it.data.mime, "cache-control": "private, max-age=31536000, immutable",
+        "content-disposition": `inline; filename="${encodeURIComponent(it.data.name)}"`, "accept-ranges": "bytes" };
+      // a byte range (players seek in long audio without loading it all)
+      const r = /^bytes=(\d*)-(\d*)$/.exec(req.headers.get("range") || ""), size = bytes.length;
+      if (r && (r[1] || r[2])) {
+        const start = r[1] ? Number(r[1]) : Math.max(0, size - Number(r[2])), end = r[1] && r[2] ? Math.min(Number(r[2]), size - 1) : size - 1;
+        if (start >= size || start > end) return new Response(null, { status: 416, headers: { "content-range": `bytes */${size}` } });
+        return new Response(bytes.subarray(start, end + 1), { status: 206, headers: { ...headers, "content-range": `bytes ${start}-${end}/${size}` } });
+      }
+      return new Response(bytes, { headers });
     }
     if (what === "events" && m === "GET") return sse(events, url.searchParams.getAll("topic"), req);
     if (what === "mcp") return actions.mcp(req);
@@ -246,7 +254,7 @@ export async function createApp(config: Config) {
     if (what === "actions" && id === "stop" && m === "POST") { actions.stop(); return json({ ok: true }); }
     if (what === "actions" && id && m === "POST") {
       try {
-        const it = actions.report(id, await req.json() as { status?: string; note?: string });
+        const it = actions.report(id, await req.json() as { status?: string; note?: string; say?: boolean });
         return it ? json(it) : json({ error: "not found" }, 404);
       } catch (e) { return json({ error: (e as Error).message }, 400); }
     }

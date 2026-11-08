@@ -93,6 +93,36 @@ export const VIEW_ACTIONS: ActionDecl[] = [
       into: { type: "string", doc: "Columns: target column id (empty = where they are)", pattern: `|${ID}`, default: "" },
       at: { type: "integer", doc: "with `into`: 1 = top; 0 = bottom", min: 0, max: 500, default: 0 } },
     required: ["ids"] },
+  { name: "media_play", level: "act", answers: true,
+    doc: "Play a voice message or any audio on the user's open page, as if they tapped play: a message id (m_...: its voice or audio attachment) in a thread or the embedded chat, or a Columns panel / Blackboards window holding an audio page or file (a folded one is unfolded first). Optional from_s / to_s play just a stretch; loop repeats it until the stop control, media_pause or the user pauses. Other playing audio on the page pauses. If the page has had no tap yet (phones block sound without one), a pink Play prompt appears at the player and the note says so; it plays once the user taps. view_describe marks items that hold players.",
+    params: { target: { type: "string", doc: "the item holding the player (data-k-id): a message, panel or window id", pattern: ID }, view: viewP,
+      index: { type: "integer", doc: "which player inside it, 1 = first (a series page lists many)", min: 1, max: 500, default: 1 },
+      from_s: { type: "number", doc: "start at this second (-1 = where it stands now)", min: -1, max: 86400, default: -1 },
+      to_s: { type: "number", doc: "stop at this second (0 = play to the end)", min: 0, max: 86400, default: 0 },
+      loop: { type: "boolean", doc: "repeat the stretch until stopped", default: false } },
+    required: ["target"] },
+  { name: "media_pause", level: "look", answers: true,
+    doc: "Pause audio on the user's open page: the player in one item, or (target empty) everything playing there.",
+    params: { target: { type: "string", doc: "item id (data-k-id); empty = all playing audio", pattern: `|${ID}`, default: "" }, view: viewP,
+      index: { type: "integer", doc: "which player inside the item, 1 = first; 0 = all of them", min: 0, max: 500, default: 0 } } },
+  { name: "media_seek", level: "look", answers: true,
+    doc: "Move a player's position without changing whether it plays (a message, panel or window id, as for media_play).",
+    params: { target: { type: "string", doc: "item id (data-k-id)", pattern: ID }, view: viewP,
+      index: { type: "integer", doc: "which player inside it, 1 = first", min: 1, max: 500, default: 1 },
+      to_s: { type: "number", doc: "the second to move to", min: 0, max: 86400 } },
+    required: ["target", "to_s"] },
+  { name: "open", level: "act", answers: true,
+    doc: "Do what tapping an item does: open a thread from the list (switch threads), a project, a board, a modality from the picker, a list row. Items with no tap action are refused.",
+    params: { target: { type: "string", doc: "item id (data-k-id) as listed by view_describe", pattern: ID }, view: viewP },
+    required: ["target"] },
+  { name: "back", level: "act", answers: true,
+    doc: "Go back one step, like the view's back arrow: from a thread to the thread list, from a board to its board list, from a modality to the picker.",
+    params: {} },
+  { name: "fold", level: "act", answers: true,
+    doc: "Fold or unfold an item, as the user's fold control does: a Columns panel, a Blackboards window (saved in the board), the embedded chat under a view (target \"strip\": folded = one line, unfolded = the whole conversation), an Archived section.",
+    params: { target: { type: "string", doc: "item id (data-k-id), or \"strip\" for the embedded chat", pattern: ID }, view: viewP,
+      folded: { type: "boolean", doc: "true = fold, false = unfold", default: true } },
+    required: ["target"] },
 ];
 
 const NAME = /^[a-z][a-z0-9_]{0,40}$/;
@@ -249,7 +279,8 @@ export class Actions {
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: "sleipnyr2", version: "1" },
           instructions: "Live effects on the user's open Sleipnyr 2 pages (blink, highlight, mark any message part, scroll, reopen the reply). "
-            + "The view_* tools work on whatever view is on screen: view_describe lists its items, then mark, scroll_to, focus, animate or order them. "
+            + "The view_* tools work on whatever view is on screen: view_describe lists its items, then mark, scroll_to, focus, animate or order them, "
+            + "open, fold or go back as the user would, and play, pause or seek audio (view_media_*). "
             + "Effects are temporary: the page's stop control or a reload ends them. Every call is logged and shown in the thread.",
         });
       case "ping": return rpc(m.id, {});
@@ -285,10 +316,15 @@ export class Actions {
     }
     const it = this.log({ ...base, args: checked.args, status: "sent" });
     const first = new Promise<ActionCall | null>(ok => {
-      const timer = setTimeout(() => { this.waiting.delete(it.id); ok(null); }, this.cfg.ackMs ?? 2500);
-      // a read (view_describe) answers with its final report; effects return once a page runs them
+      const give = () => { this.waiting.delete(it.id); ok(null); };
+      let timer = setTimeout(give, this.cfg.ackMs ?? 2500);
+      // a read (view_describe) answers with its final report; effects return once a page runs them;
+      // an answering action (media_play) once the page says what happened (a page took it: wait longer)
       this.waiting.set(it.id, c => {
-        if (t.decl.level === "read" && c.status === "running") return;
+        if (c.status === "running" && (t.decl.level === "read" || (t.decl.answers && !c.note))) {
+          if (t.decl.answers) { clearTimeout(timer); timer = setTimeout(() => { const cur = this.items.get<ActionCall>(it.id); this.waiting.delete(it.id); ok(cur?.data || null); }, 12000); }
+          return;
+        }
         clearTimeout(timer); this.waiting.delete(it.id); ok(c);
       });
     });
@@ -306,18 +342,20 @@ export class Actions {
   }
 
   /** POST /k/actions/<id>: a page reports what it did with a call. */
-  report(id: string, b: { status?: string; note?: string }): Item<ActionCall> | null {
+  report(id: string, b: { status?: string; note?: string; say?: boolean }): Item<ActionCall> | null {
     const it = this.items.get<ActionCall>(id);
     if (!it || it.type !== "action-call") return null;
     const status = String(b.status) as CallStatus;
     if (!["running", "done", "stopped", "failed"].includes(status)) throw new Error("status must be running, done, stopped or failed");
-    const note = String(b.note || "").slice(0, 4000); // a describe answer lists the view's items
+    const note = String(b.note || "").slice(0, 16000); // a describe answer lists the view's items
     const patch: Record<string, unknown> = {};
-    if (status === "running") patch.pages = (it.data.pages || 0) + 1;
+    // say = the running page's word on what happens now (media_play: "playing"), not another page
+    const say = status === "running" && b.say === true;
+    if (status === "running" && !say) patch.pages = (it.data.pages || 0) + 1;
     // refused/invalid never change; an ended call never goes back to running
     const cur = it.data.status;
     if (!["refused", "invalid"].includes(cur) && !(status === "running" && FINAL.includes(cur))) patch.status = status;
-    if (note && (!it.data.note || status !== "running")) patch.note = note;
+    if (note && (!it.data.note || status !== "running" || say)) patch.note = note;
     const up = Object.keys(patch).length ? this.items.update<ActionCall>(id, patch) : it;
     this.waiting.get(id)?.(up.data);
     return up;

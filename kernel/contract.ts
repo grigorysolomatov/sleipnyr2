@@ -83,6 +83,9 @@ export interface ActionDecl {
   level: ActionLevel;
   params?: Record<string, ActionParam>;
   required?: string[];
+  /** the call returns the page's own first word on what happened (e.g.
+   *  "playing" or "waiting for a tap"), not just that a page took it */
+  answers?: boolean;
 }
 
 /** Event topic: {run: {id, plugin, action, args}} or {stop: true}. */

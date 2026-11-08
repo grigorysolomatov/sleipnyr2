@@ -124,3 +124,12 @@
 .k-fx-stop[hidden] { display: none; }
 .k-fx-stop svg { width: .9rem; height: .9rem; fill: var(--accent-here); }
 .k-fx-stop:hover { border-color: var(--accent-here); }
+/* an agent wants to play sound but the page has had no tap yet: one tap plays it */
+.k-fx-play {
+  position: fixed; z-index: 56; transform: translate(-50%, -50%);
+  display: flex; align-items: center; gap: .4rem; padding: .45rem 1rem; font: inherit; cursor: pointer;
+  background: var(--accent-here); color: var(--bg); border: 1px solid var(--text); border-radius: var(--radius);
+  animation: k-fx-play 1.2s ease-in-out infinite;
+}
+.k-fx-play svg { width: 1rem; height: 1rem; fill: currentColor; }
+@keyframes k-fx-play { 50% { box-shadow: 0 0 0 .4rem color-mix(in srgb, var(--accent-here) 35%, transparent); } }
