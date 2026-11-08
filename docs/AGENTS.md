@@ -108,6 +108,15 @@ view; the agent answers with one short sentence plus `@name args` action
 lines that the page runs (open, rename, hide, add, move...). The note lists
 the allowed lines; never invent others.
 
+## Kanban report-back (optional)
+
+With `kanbanReport` enabled (or `tools/kanban-report/kanban_report.py` running),
+a finished card posts a notice into its origin thread, which gives you a turn
+without a user message: report the card's result plainly. Origin = the thread
+of the Hermes session that created the card; to pin it, put
+`origin: sleipnyr2:<thread id>` on its own line in the card body. Notices are
+idempotent (key = board, card, event), so never repeat one yourself.
+
 ## Deploy, rollback, tests
 
 - `tests/check.sh`: TypeScript check, syntax check of every web file, unit

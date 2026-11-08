@@ -213,7 +213,7 @@ export async function mount(root, ctx) {
 
   function drawThreads() {
     list.replaceChildren(...st.threads.map(t => h("li", {},
-      h("a", { href: ctx.address(t.id), "data-id": t.id, "data-k-id": t.id, "data-k-kind": "thread", class: [t.id === (st.cursor ?? st.open) ? "here" : "", st.marks.has(t.id) ? "marked" : ""].join(" ").trim(),
+      h("a", { href: ctx.address(t.id), "data-id": t.id, "data-k-id": t.id, "data-k-kind": "thread", class: [t.id === (st.cursor ?? st.open) ? "here" : "", st.marks.has(t.id) ? "marked" : "", t.data.unread ? "unread" : ""].join(" ").trim(),
         "aria-current": t.id === st.open ? "page" : false, "data-tip": st.marks.get(t.id)?.reason || null,
         style: st.marks.get(t.id)?.color ? `--mark: ${st.marks.get(t.id).color}` : null,
         onclick: e => { e.preventDefault(); openThread(t.id, true); } },
@@ -230,6 +230,7 @@ export async function mount(root, ctx) {
   const threadOf = id => st.threads.find(x => x.id === id) || (st.hist?.id === id ? st.hist : null);
 
   function author(d) {
+    if (d.notice) return "Notice";
     if (d.role === "user") return ctx.user?.name || "You";
     const t = threadOf(d.thread);
     const id = t?.data.agent || "";
@@ -261,6 +262,7 @@ export async function mount(root, ctx) {
     if (push) ctx.go(id);
     const t = threadOf(id);
     title.textContent = t ? t.data.title : "";
+    if (t?.data.unread) markRead(id);
     shell.classList.add("thread-open");
     mb.focus("thread"); // opening a thread: the bar talks to it
     drawThreads();
@@ -268,6 +270,11 @@ export async function mount(root, ctx) {
     if (st.open !== id) return;
     st.msgs = new Map(msgs.map(m => [m.id, m]));
     drawLog(true);
+  }
+
+  // a thread with news nobody asked for (a notice's reply) is bold in the list until opened
+  function markRead(id) {
+    ctx.api(`${API}/threads/${encodeURIComponent(id)}`, { method: "PATCH", json: { read: true } }).catch(() => { /* stays bold */ });
   }
 
   // back to the list: the address follows, so a reload or the browser's back stays where you are
@@ -316,7 +323,7 @@ export async function mount(root, ctx) {
 
   function messageEl(m) {
     const d = m.data, live = st.live.get(m.id);
-    const el = h("article", { class: `c-msg ${d.role}`, id: m.id, "data-id": m.id, "data-k-id": m.id, "data-k-kind": `${d.role} message` });
+    const el = h("article", { class: `c-msg ${d.role}${d.notice ? " notice" : ""}`, id: m.id, "data-id": m.id, "data-k-id": m.id, "data-k-kind": `${d.role} message` });
     el.append(h("header", { class: "c-who" }, h("b", {}, author(d)), h("time", {}, when(m.created)),
       d.from ? h("small", { class: "c-from", "data-tip": "Sent with what that view showed" }, `from the ${d.from}`) : null));
     for (const f of d.files || []) el.append(fileEl(f));
@@ -324,7 +331,8 @@ export async function mount(root, ctx) {
       el.append(voiceEl(ctx.fileUrl(d.voice)));
       if (d.transcript !== undefined) el.append(h("p", { class: "c-transcript" }, d.transcript || "(no speech recognised)"));
     }
-    const text = d.role === "agent" && live && live.text.length > (d.text || "").length ? live.text : d.text;
+    // a notice (posted by a local service, e.g. a finished Kanban card) shows its one line; the agent got the full text
+    const text = d.notice ? d.notice : d.role === "agent" && live && live.text.length > (d.text || "").length ? live.text : d.text;
     if (text) {
       const box = h("div", { class: "c-text" }, render(text));
       el.append(box);
@@ -462,7 +470,8 @@ export async function mount(root, ctx) {
         st.threads.sort((a, b) => b.updated - a.updated);
         drawThreads();
       }
-      if (item.id === st.open) { title.textContent = item.data.title; mb.refresh(); }
+      if (item.id === st.open) { title.textContent = item.data.title; mb.refresh();
+        if (item.data.unread && shell.classList.contains("thread-open") && document.visibilityState === "visible") markRead(item.id); }
       if (st.hist?.id === item.id && !item.data.view) { st.hist = item; setStripName(); }
     } else if (item.type === "message") {
       if (st.hist && item.data.thread === st.hist.id) try { histMessage(item); } catch (e) { console.error(e); }

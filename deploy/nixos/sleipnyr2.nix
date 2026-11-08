@@ -65,6 +65,13 @@ in
       prompt = lib.mkOption { type = lib.types.str; default = ""; description = "Names and jargon to expect."; };
     };
     speak.voice = lib.mkOption { type = lib.types.str; default = "am_michael"; description = "Kokoro voice."; };
+    kanbanReport = {
+      enable = lib.mkEnableOption "reports from finished Hermes Kanban cards into the chat thread that started them";
+      user = lib.mkOption { type = lib.types.str; description = "The account that runs Hermes (reads its Kanban boards and state.db)."; };
+      hermesHome = lib.mkOption { type = lib.types.str; description = "That account's Hermes home, e.g. /home/<user>/.hermes."; };
+      sessionPrefix = lib.mkOption { type = lib.types.str; default = "sleipnyr2-"; description = "Session id prefix of the agent-hermes plugin."; };
+      interval = lib.mkOption { type = lib.types.int; default = 20; description = "Seconds between passes."; };
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -157,6 +164,37 @@ in
         Restart = "always";
         RestartSec = 5;
         MemoryMax = "3G";
+      };
+    };
+
+    # Finished cards report back: tools/kanban-report/kanban_report.py follows every board's task
+    # events and posts a notice into the card's origin thread, which runs an agent turn there.
+    systemd.services.sleipnyr2-kanban-report = lib.mkIf cfg.kanbanReport.enable {
+      description = "Sleipnyr 2: finished Kanban cards report into their chat thread";
+      wantedBy = [ "multi-user.target" ];
+      after = [ "sleipnyr2.service" ];
+      unitConfig.ConditionPathExists = "${cfg.stateDir}/releases/current/tools/kanban-report/kanban_report.py";
+      environment = {
+        KR_BOARDS = "${cfg.kanbanReport.hermesHome}/kanban/boards";
+        KR_STATE_DB = "${cfg.kanbanReport.hermesHome}/state.db";
+        KR_STATE_DIR = "/var/lib/sleipnyr2-kanban-report";
+        KR_APP = "http://127.0.0.1:${toString cfg.port}";
+        KR_PREFIX = cfg.kanbanReport.sessionPrefix;
+        KR_POLL = toString cfg.kanbanReport.interval;
+        PYTHONUNBUFFERED = "1";
+      };
+      serviceConfig = {
+        # the release folder is private to the app's account: systemd hands the script over (%d = credentials dir)
+        LoadCredential = [ "kanban_report.py:${cfg.stateDir}/releases/current/tools/kanban-report/kanban_report.py" ];
+        ExecStart = "${pkgs.python3}/bin/python3 %d/kanban_report.py";
+        User = cfg.kanbanReport.user;
+        StateDirectory = "sleipnyr2-kanban-report";
+        NoNewPrivileges = true;
+        PrivateTmp = true;
+        ProtectSystem = "full"; # Kanban and state.db are opened read-only (SQLite mode=ro), WAL needs their -shm files
+        Restart = "always";
+        RestartSec = 10;
+        Nice = 10;
       };
     };
 

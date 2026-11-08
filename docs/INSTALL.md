@@ -219,6 +219,37 @@ mcp_servers:
 with `SLEIPNYR2_MCP_KEY` in Hermes' `.env` and the same value in
 Sleipnyr's env file.
 
+### Optional: report-back from Hermes Kanban
+
+If your Hermes agent creates Kanban cards from a chat thread, finished cards
+can report back into that thread unasked. `tools/kanban-report/kanban_report.py`
+follows every board's task events (read-only) and, for completed, review,
+blocked (not dependency waits) and gave-up cards, posts
+`POST /p/chat/threads/<id>/notices`: the thread shows one quiet "Notice" line,
+the agent runs a turn with the full text and reports in its own voice, and the
+thread is bold (unread) in the list until opened.
+
+The origin thread is inferred from the Hermes session that created the card
+(session id `sleipnyr2-<thread id>-...`, the agent-hermes prefix). Override with
+a line in the card body:
+
+```
+origin: sleipnyr2:<thread id>
+```
+
+or `kanban_report.py watch <board> <card> <thread>`. On NixOS:
+
+```
+services.sleipnyr2.kanbanReport = {
+  enable = true;
+  user = "hermes-user";                # account that runs Hermes
+  hermesHome = "/home/hermes-user/.hermes";
+};
+```
+
+Elsewhere run the script as a service with `KR_BOARDS`, `KR_STATE_DB`,
+`KR_STATE_DIR`, `KR_APP` (see its docstring). First start has no backlog.
+
 ## 4. NixOS
 
 Copy `deploy/nixos/sleipnyr2.nix` into your configuration and import it:

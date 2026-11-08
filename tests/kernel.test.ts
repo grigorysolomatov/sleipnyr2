@@ -126,6 +126,22 @@ test("chat: a thread with no agent reports an error, not a hang", async () => {
   expect((await call("GET", `/k/items/${t.id}`)).body.data.title).toBe("hello there");
 });
 
+test("chat notices: a local service starts a turn without a user message; same key = one post", async () => {
+  const t = (await call("POST", "/p/chat/threads", {})).body;
+  await call("PATCH", `/p/chat/threads/${t.id}`, { hidden: true });
+  expect((await call("POST", `/p/chat/threads/${t.id}/notices`, { text: "x" })).status).toBe(400);
+  expect((await call("POST", "/p/chat/threads/t_nope/notices", { text: "x", notice: "y" })).status).toBe(404);
+  const body = { notice: "Card t_1 done: a title", text: "[Automatic notice] full handoff", key: "kanban:b:t_1:7" };
+  const one = await call("POST", `/p/chat/threads/${t.id}/notices`, body);
+  expect(one.status).toBe(201);
+  expect(one.body.user.data).toMatchObject({ role: "user", notice: "Card t_1 done: a title", noticeKey: "kanban:b:t_1:7", text: body.text });
+  const two = await call("POST", `/p/chat/threads/${t.id}/notices`, body);
+  expect(two.status).toBe(200);
+  expect(two.body.user.id).toBe(one.body.user.id);
+  expect((await call("GET", `/k/items/${t.id}`)).body.data.hidden).toBeFalsy(); // news brings an archived thread back
+  expect((await call("PATCH", `/p/chat/threads/${t.id}`, { read: true })).status).toBe(200);
+});
+
 test("chat refuses empty messages and unknown files", async () => {
   const t = (await call("POST", "/p/chat/threads", {})).body;
   expect((await call("POST", `/p/chat/threads/${t.id}/messages`, { text: " " })).status).toBe(400);

@@ -29,7 +29,7 @@ import type {
   AgentService, AgentTurn, AttachedFile, FileData, Item, Kernel, ServerPlugin, TranscribeService,
 } from "../../kernel/contract.ts";
 
-export interface Thread { title: string; titleAuto?: boolean; agent: string; state: Record<string, unknown>; hidden?: boolean; view?: string }
+export interface Thread { title: string; titleAuto?: boolean; agent: string; state: Record<string, unknown>; hidden?: boolean; view?: string; unread?: boolean }
 export interface Action { name: string; args: string; body?: string }
 /** A declared agent action (kernel/actions.ts) the agent called during this reply's turn. */
 export interface CallNote { id: string; text: string }
@@ -40,6 +40,9 @@ export interface Message {
   // stopped (agent reply): stopped by the user; skipped = it never ran. cancelled (user message): never sent.
   // steered: the user message went into the turn that was already running (its reply stays empty, hidden).
   skipped?: boolean; steered?: boolean;
+  // notice: posted by a local service, not typed by the user (e.g. "Card t_1 done: title"); shown as this
+  // one quiet line while the agent gets the full text. noticeKey makes a repeated post a no-op.
+  notice?: string; noticeKey?: string;
 }
 
 /** One message waiting for or getting its reply. preparing = a "send now" being transcribed (the line waits). */
@@ -168,9 +171,10 @@ class Chat {
   }
 
   /** PATCH /threads/:id: {title?} renames (manual), {hidden?} archives or brings back. Never deletes. */
-  change(threadId: string, b: { title?: unknown; hidden?: unknown }) {
+  change(threadId: string, b: { title?: unknown; hidden?: unknown; read?: unknown }) {
     const t = this.k.items.get<Thread>(threadId);
     if (!t || t.type !== "thread") throw new HttpError(404, "no such thread");
+    if (b.read === true) { if (t.data.unread) this.k.items.update<Thread>(threadId, { unread: null }); if (b.title === undefined && b.hidden === undefined) return this.k.items.get<Thread>(threadId)!; }
     if (b.title === undefined && typeof b.hidden !== "boolean") throw new HttpError(400, "title or hidden required");
     if (b.title !== undefined) this.rename(threadId, b.title as string);
     if (typeof b.hidden === "boolean") {
@@ -259,9 +263,29 @@ class Chat {
     return this.k.items.create<Thread>("thread", { title, agent, state: {} });
   }
 
+  /**
+   * POST /threads/:id/notices: a local service (e.g. the Kanban report bridge) starts an agent turn in a
+   * thread without a user message: text goes to the agent, notice is the one line shown. The same key twice
+   * returns the first post. The reply marks the thread unread.
+   */
+  notify(threadId: string, b: { text?: unknown; notice?: unknown; key?: unknown }) {
+    const t = this.k.items.get<Thread>(threadId);
+    if (!t || t.type !== "thread") throw new HttpError(404, "no such thread");
+    const text = String(b.text ?? "").slice(0, 20000), notice = String(b.notice ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
+    const key = String(b.key ?? "").slice(0, 120);
+    if (!text.trim() || !notice) throw new HttpError(400, "text and notice required");
+    if (key) {
+      const old = this.messages(threadId).find(m => m.data.noticeKey === key);
+      if (old) return { user: old, reply: old.data.reply ? this.k.items.get<Message>(old.data.reply) : null, repeated: true };
+    }
+    const out = this.post(threadId, text, [], undefined, undefined, "queue", { notice, ...(key ? { noticeKey: key } : {}) });
+    if (t.data.hidden) this.k.items.update<Thread>(threadId, { hidden: null }); // archived threads come back for news
+    return out;
+  }
+
   /** Saves the user's message and a placeholder reply, then runs the turn in the background. */
   /** view.transcript: the voice was already transcribed (hands-free talk mode), so the turn skips hearing. */
-  post(threadId: string, text: string, files: string[], voice?: string, view?: { from?: string; context?: string; transcript?: string }, mode = "queue") {
+  post(threadId: string, text: string, files: string[], voice?: string, view?: { from?: string; context?: string; transcript?: string }, mode = "queue", extra: Partial<Message> = {}) {
     if (mode !== "queue" && mode !== "now") throw new Error("mode must be queue or now");
     const thread = this.k.items.get<Thread>(threadId);
     if (!thread || thread.type !== "thread") throw new Error("no such thread");
@@ -273,7 +297,7 @@ class Chat {
     const from = String(view?.from || "").slice(0, 60), context = String(view?.context || "").slice(0, 20000);
     const user = this.k.items.create<Message>("message", { thread: threadId, role: "user", text, files, voice,
       status: voice && heard === undefined ? "transcribing" : "done", ...(heard !== undefined ? { transcript: heard } : {}),
-      ...(from ? { from } : {}), ...(context ? { context } : {}) });
+      ...(from ? { from } : {}), ...(context ? { context } : {}), ...extra });
     const reply = this.k.items.create<Message>("message", { thread: threadId, role: "agent", text: "", files: [], status: "queued" });
     this.k.items.update(user.id, { reply: reply.id });
     this.k.links.add(user.id, "in", threadId);
@@ -468,6 +492,7 @@ class Chat {
             ...(acts?.actions.length ? { actions: acts.actions } : {}) });
           this.publish(threadId, replyId, { progress: "" });
           this.maybeRetitle(threadId);
+          if (user.data.notice && !thread.data.view) this.k.items.update<Thread>(threadId, { unread: true }); // news nobody asked for: bold in the list
           // messages sent into this turn that it never took in: they get their own turns, next
           if (ev.unsent && a.steered.length) for (const j of [...a.steered].reverse()) {
             this.k.items.update(j.userId, { steered: false });
@@ -554,7 +579,7 @@ const plugin: ServerPlugin = {
         return Response.json(c().newThread(b.title), { status: 201 });
       },
       "PATCH /threads/:id": async (req, p) => {
-        const b = await req.json().catch(() => ({})) as { title?: string; hidden?: boolean };
+        const b = await req.json().catch(() => ({})) as { title?: string; hidden?: boolean; read?: boolean };
         try { return Response.json(c().change(p.id, b)); } catch (e) { return bad(e); }
       },
       "POST /threads/:id/title": async (req, p) => {
@@ -565,6 +590,11 @@ const plugin: ServerPlugin = {
       "POST /threads/:id/messages": async (req, p) => {
         const b = await req.json() as { text?: string; files?: string[]; voice?: string; from?: string; context?: string; transcript?: string; mode?: string };
         try { return Response.json(c().post(p.id, String(b.text || ""), b.files || [], b.voice, b, b.mode || "queue"), { status: 201 }); }
+        catch (e) { return bad(e); }
+      },
+      "POST /threads/:id/notices": async (req, p) => {
+        const b = await req.json().catch(() => ({})) as { text?: string; notice?: string; key?: string };
+        try { const out = c().notify(p.id, b); return Response.json(out, { status: (out as { repeated?: boolean }).repeated ? 200 : 201 }); }
         catch (e) { return bad(e); }
       },
       "POST /threads/:id/stop": async (req, p) => {
