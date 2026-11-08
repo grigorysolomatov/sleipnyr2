@@ -543,9 +543,10 @@ export async function mount(root, ctx) {
   }
 
   // a thread shown in place of the view's conversation (picked in the threads menu, or a next thread of it)
+  const plain = t => String(t || "").replace(/ \(until [^)]*\)$/, ""); // a retired history is titled "<name> (until <time>)"
   const isAlt = () => !!st.hist && !st.hist.data.view;
   function setStripName() {
-    stripName.textContent = isAlt() ? st.hist.data.title || "Thread" : emb.title || `${emb.view} conversation`;
+    stripName.textContent = isAlt() ? plain(st.hist.data.title) || "Thread" : emb.title || `${emb.view} conversation`;
     tmBtn.classList.toggle("alt", isAlt());
   }
 
@@ -574,7 +575,7 @@ export async function mount(root, ctx) {
     tm.replaceChildren(
       head("Conversations here"),
       own ? row(own, emb.title || `${emb.view} conversation`, "This view's own · " + dayTime(own.updated)) : null,
-      ...earlier.map(t => row(t, String(t.data.title || "Thread").replace(/ \(until [^)]*\)$/, ""), "Earlier here · " + dayTime(t.updated))),
+      ...earlier.map(t => row(t, `${emb.title || "Earlier conversation"} (earlier)`, "Replaced by a new thread · " + dayTime(t.updated))),
       recent.length ? head("Recent threads") : null,
       ...recent.map(t => row(t, t.data.title || "Thread", dayTime(t.updated))));
     placeMenu();
