@@ -3,7 +3,7 @@
 // Config plugins.limits.balances = [{id, name, file}], each file a balance
 // JSON written by a fetcher (schema_version 1, no secrets):
 //   {fetched_at, status: ok|stale|unavailable, balance: {amount, currency},
-//    facts: [{label, value}]}
+//    facts: [{label, value}], stale_after?: s, error?: short reason}
 // -> balances: [{id, name, amount, currency, facts, updated_at, stale?, error?}]
 // Config (plugins.limits): sources = [{id, name, file}], each file a usage
 // JSON written by a fetcher on this machine (schema_version 1):
@@ -73,8 +73,11 @@ export function balance(s: { id: string; name: string }, d: any, now: number) {
   base.facts = (Array.isArray(d.facts) ? d.facts : []).flatMap((f: any) =>
     f && typeof f.label === "string" && (num(f.value) != null || typeof f.value === "string")
       ? [{ label: f.label.slice(0, 60), value: typeof f.value === "string" ? f.value.slice(0, 60) : f.value }] : []);
-  if (d.status === "unavailable" || base.amount == null) return { ...base, error: "no data" };
-  if (d.status === "stale" || (base.updated_at != null && now - base.updated_at > BAL_STALE_S)) base.stale = true;
+  const why = typeof d.error === "string" && d.error ? d.error.slice(0, 60) : null;
+  if (d.status === "unavailable" || base.amount == null) return { ...base, error: why || "no data" };
+  const staleS = num(d.stale_after) ?? BAL_STALE_S;
+  if (d.status === "stale" || (base.updated_at != null && now - base.updated_at > staleS)) base.stale = true;
+  if (base.stale && why) base.error = why;
   return base;
 }
 

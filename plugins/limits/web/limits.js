@@ -36,7 +36,7 @@ function left(t) {
   return s < 60 ? "now" : d ? `${d} d ${hh} h` : hh ? `${hh} h ${m} min` : `${m} min`;
 }
 const hm = t => { const d = new Date(t * 1000); return two(d.getHours()) + ":" + two(d.getMinutes()); };
-const money = (a, c) => c === "USD" ? "$" + a.toFixed(2) : `${a.toFixed(2)} ${c || ""}`.trim();
+const money = (a, c) => c === "USD" ? "$" + a.toFixed(2) : `${a} ${c || ""}`.trim();
 const ago = t => { const s = Date.now() / 1000 - t; return s < 90 ? "just now" : s < 3600 ? Math.round(s / 60) + " min ago" : Math.round(s / 3600) + " h ago"; };
 const wname = w => w.name || (w.label === "5h" ? "Session" : w.label === "7d" ? "Week" : w.label);
 // week first (the main quota), then the rest in their order
