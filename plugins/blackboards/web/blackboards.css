@@ -92,7 +92,8 @@
 .ss-zx { color: var(--text-muted); }
 .ss-zx svg { width: 1.2rem; height: 1.2rem; }
 .ss-zone.drag { transition: none; }
-.ss-zgrip { cursor: nwse-resize; }
+.ss-zgrip { cursor: nwse-resize; width: 3.2rem; height: 3.2rem; }
+.ss-zgrip svg { width: 2rem; height: 2rem; }
 
 /* a window: title bar (drag), its view, a corner grip (resize) */
 .ss-win {
