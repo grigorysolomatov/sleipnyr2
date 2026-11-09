@@ -24,8 +24,14 @@
 //     fresh  (on a window) the agent marked it new (@new, green frame; true or the reason); a
 //            tap, focus or unfolding it clears it; any number of windows at once
 //     x, y, w, h  board units (zoom 1 = CSS px); z = stacking order
-//     zones  [{id, title, x, y, w, h}]: labelled frames behind the windows (@zone); a window
-//            belongs to the zone holding its centre; Arrange tidies each zone on its own
+//     zones  [{id, title, x, y, w, h, auto?}]: labelled frames behind the windows (@zone); a window
+//            belongs to the zone holding its centre; Arrange tidies each zone on its own;
+//            auto = the "Unsorted" zone the agent's unplaced windows land in (removed once empty)
+// Placement (place.js): a new window never covers another one. The agent's
+// windows go to the first free slot of the zone it names ("in <zone>"), or of
+// "Unsorted" below all zones; a hand-added one to the free slot nearest the
+// middle of the screen. The zone grows to hold it. A @move onto another
+// window is nudged to the nearest free slot in the same zone.
 // Own place: the open board (ctx.levels.go("blackboards", id)). Its
 // conversation sits in the embedded chat (ctx.embed), the bar talks to it, and
 // replies may carry "@name args" lines (see describe()).
@@ -33,6 +39,7 @@ import { render } from "/web/text.js";
 import { darkFrame } from "/web/frame.js";
 import { ONE_SENTENCE, runs } from "/web/hcp.js";
 import { backButton } from "/web/head.js";
+import * as P from "./place.js";
 
 const ME = "blackboards";
 // the board's conversation (view history thread) keeps the old view name, so
@@ -66,9 +73,8 @@ const KINDS = {
 };
 const ZMIN = 0.2, ZMAX = 2.5;
 // the dot grid windows snap to (board px), the gap Arrange leaves, glide length
-const GRID = 24, GAP = 24, GLIDE = 220;
-const snap = v => Math.round(v / GRID) * GRID;
-const snapUp = v => Math.ceil(v / GRID) * GRID;
+const { GRID, GAP, snap, snapUp } = P;
+const GLIDE = 220;
 const ease = t => 1 - Math.pow(1 - t, 3);
 const NARROW = "(max-width: 760px)";
 const MEMO = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h7M9 17h5"/></svg>';
@@ -136,8 +142,7 @@ export function mount(box, ctx) {
   const wins = () => sess()?.windows || [];
   const zones = () => sess()?.zones || [];
   // the zone holding a window's centre (folded windows count by their title bar)
-  const zoneOf = w => { const cx = w.x + w.w / 2, cy = w.y + (w.collapsed ? 20 : w.h / 2);
-    return zones().find(z => cx >= z.x && cx < z.x + z.w && cy >= z.y && cy < z.y + z.h) || null; };
+  const zoneOf = w => P.zoneOf(zones(), w);
   // the phone keeps its own view of the board (viewPhone), the desktop's stays as it was
   const VK = () => (st.narrow ? "viewPhone" : "view");
   const viewOf = () => ({ x: 0, y: 0, z: 1, ...(sess()?.[VK()] || {}) });
@@ -354,7 +359,7 @@ export function mount(box, ctx) {
       if (Math.hypot(dx, dy) * viewOf().z < 8) {
         for (const w of members) { w.x = w.ox; w.y = w.oy; place(w); delete w.ox; delete w.oy; }
         el.style.left = z.x + "px"; el.style.top = z.y + "px";
-        if (!cancelled) { const t = prompt("Section name", z.title); if (t?.trim()) { z.title = t.trim(); drawZones(); save(); } }
+        if (!cancelled) { const t = prompt("Section name", z.title); if (t?.trim()) { z.title = t.trim(); delete z.auto; drawZones(); save(); } }
         return;
       }
       const nx = snap(sx + dx), ny = snap(sy + dy), mx = nx - sx, my = ny - sy;
@@ -386,7 +391,7 @@ export function mount(box, ctx) {
     const all = sess().zones = [...zones()];
     let z = all.find(q => q.title.toLowerCase() === t.toLowerCase() || q.id === t);
     if (!z) { z = { id: "z" + (Math.max(0, ...all.map(q => Number(String(q.id).slice(1)) || 0)) + 1), title: t, x: 0, y: 0, w: 960, h: 720 }; all.push(z); }
-    else z.title = z.id === t ? z.title : t;
+    else { z.title = z.id === t ? z.title : t; delete z.auto; } // placed by hand or by the agent: no longer the automatic one
     z.x = snap(num(x, z.x)); z.y = snap(num(y, z.y)); z.w = Math.max(240, snap(num(ww, z.w))); z.h = Math.max(144, snap(num(hh, z.h)));
     drawBoard(); save(); return z;
   }
@@ -696,7 +701,7 @@ export function mount(box, ctx) {
       if (Math.hypot(dx, dy) * viewOf().z < 8) { if (el()) el().style.transform = ""; if (!cancelled) setCollapsed(id, !w.collapsed, true); return; }
       const from = { ...geo(w), x: sx + dx, y: sy + dy };
       w.x = snap(from.x); w.y = snap(from.y);
-      glideWin(w, from); save();
+      glideWin(w, from); pruneAuto(); drawZones(); save();
     });
   }
   function resizeWin(grip, id) {
@@ -783,7 +788,44 @@ export function mount(box, ctx) {
   function seen(id) { if (find(id)?.fresh) setFresh(id, false); }
 
   // ------------------------------------------------------------ windows
-  function addWin(kind, ref = "", title = "") {
+  // the zone named in an agent line ("in <zone>"), or null
+  const zoneNamed = t => { const q = String(t || "").trim().toLowerCase(); return q ? zones().find(z => z.title.toLowerCase() === q || z.id === q) || null : null; };
+  // "<rest> in <zone title>" -> [rest, zone] when the tail names an existing zone
+  function splitZone(a) {
+    const m = [...String(a).matchAll(/\s+in\s+/gi)];
+    for (const x of m) { const z = zoneNamed(a.slice(x.index + x[0].length)); if (z) return [a.slice(0, x.index).trim(), z]; }
+    return [a, null];
+  }
+  // the zone the agent's unplaced windows land in, below all others (made on demand)
+  function unsorted(size) {
+    const all = sess().zones = [...zones()];
+    let z = all.find(q => q.auto) || all.find(q => q.title.toLowerCase() === "unsorted");
+    if (z) return z;
+    const r = P.belowZones(all, P.snapUp(size.w + 2 * P.PAD), P.snapUp(P.TOP + size.h + P.PAD));
+    z = { id: "z" + (Math.max(0, ...all.map(q => Number(String(q.id).slice(1)) || 0)) + 1), title: "Unsorted", auto: true, ...r };
+    all.push(z); return z;
+  }
+  // an empty "Unsorted" goes away by itself
+  function pruneAuto() {
+    const keep = zones().filter(z => !z.auto || wins().some(w => P.inZone(z, w)));
+    if (keep.length !== zones().length) sess().zones = keep;
+  }
+  // a zone grows (never shrinks) to hold a window (by default the zone holding its centre)
+  function growFor(w, z = zoneOf(w)) {
+    if (!z) return;
+    const g = P.grown(z, w); z.w = g.w; z.h = g.h;
+  }
+  // where a new window of size k goes; opts.zone = a zone, opts.agent = placed by the agent
+  function slotFor(k, opts) {
+    const size = { w: k.w, h: k.h }, ws = wins();
+    if (opts.zone) return { ...P.slotIn(opts.zone, ws, size, zones()), zone: opts.zone };
+    if (opts.agent && zones().length) { const z = unsorted(size); return { ...P.slotIn(z, ws, size, zones()), zone: z }; }
+    const r = board.getBoundingClientRect(), v = viewOf();
+    const cx = ((r.width || innerWidth) / 2 - v.x) / v.z, cy = ((r.height || innerHeight) / 2 - v.y) / v.z;
+    const at = { x: snap(cx - k.w / 2), y: snap(cy - Math.min(k.h, 520) / 2), ...size };
+    return P.nearestFree(at, ws, P.zoneOf(zones(), at)) || P.nearestFree(at, ws) || at;
+  }
+  function addWin(kind, ref = "", title = "", opts = {}) {
     if (!st.open) throw new Error(`no ${WORD} is open`);
     if (!KINDS[kind]) throw new Error(`unknown window kind ${kind}`);
     if (kind === "thread" && !ref) throw new Error("which thread?");
@@ -791,14 +833,12 @@ export function mount(box, ctx) {
     if (kind === "url" && !safeUrl(ref)) throw new Error("not an http(s) address");
     const ws = st.open.data.windows ||= [];
     const id = "w" + (Math.max(0, ...ws.map(w => Number(String(w.id).slice(1)) || 0)) + 1);
-    const k = KINDS[kind], r = board.getBoundingClientRect(), v = viewOf();
-    const n = ws.length % 6;
-    const cx = ((r.width || innerWidth) / 2 - v.x) / v.z, cy = ((r.height || innerHeight) / 2 - v.y) / v.z;
+    const k = KINDS[kind], at = slotFor(k, opts);
     const w = { id, kind, ref: kind === "url" ? safeUrl(ref) : kind === "note" ? "" : String(ref), title: title || (kind === "url" ? new URL(safeUrl(ref)).host : ""),
       ...(kind === "note" ? { text: String(ref || "") } : {}),
-      x: snap(cx - k.w / 2 + n * GRID), y: snap(cy - Math.min(k.h, 520) / 2 + n * GRID), w: k.w, h: k.h, collapsed: false,
+      x: at.x, y: at.y, w: k.w, h: k.h, collapsed: false,
       z: Math.max(0, ...ws.map(x => x.z || 0)) + 1 };
-    ws.push(w); st.here = id;
+    ws.push(w); st.here = id; growFor(w, at.zone || zoneOf(w));
     drawBoard(); save();
     if (talks(w)) ctx.bar.focus(WIN);
     return w;
@@ -813,7 +853,7 @@ export function mount(box, ctx) {
     st.open.data.windows = wins().filter(w => w.id !== id);
     if (sess()?.highlight?.id === id) st.open.data.highlight = null;
     if (st.here === id) { st.here = ""; ctx.bar.focus(ME); }
-    drawBoard(); save();
+    pruneAuto(); drawBoard(); save();
   }
   function moveWin(id, x, y, ww, hh) {
     const w = find(id); if (!w) throw new Error(`no window ${id}`);
@@ -821,7 +861,16 @@ export function mount(box, ctx) {
     w.x = snap(num(x, w.x)); w.y = snap(num(y, w.y));
     if (ww != null) w.w = Math.max(216, snap(num(ww, w.w)));
     if (hh != null) w.h = Math.max(120, snap(num(hh, w.h)));
+    // onto another window: the nearest free slot in the same zone instead
+    const others = wins().filter(o => o !== w), hit = others.find(o => P.overlaps(w, o));
+    let note = "";
+    if (hit) {
+      const z = zoneOf(w), p = P.nearestFree(w, others, z) || (z ? P.slotIn(z, others, w, zones()) : null);
+      if (p) { w.x = p.x; w.y = p.y; note = ` (nudged to x ${p.x} y ${p.y}: ${hit.id} was there)`; }
+    }
+    growFor(w); pruneAuto(); drawZones();
     glideWin(w, from); save();
+    return note;
   }
   function openFull(id) {
     const w = find(id); if (!w) return;
@@ -938,7 +987,8 @@ export function mount(box, ctx) {
       ...wins().filter(w => w.agentNotes).map(w => `Notes for window ${w.id}:\n${w.agentNotes}`)].filter(Boolean).join("\n\n");
     return `${notes ? `[Agent notes, hidden from ${WHO}'s board view, kept with the ${WORD}]\n${notes}\n[End of agent notes]\n\n` : ""}[Sent from the Sleipnyr ${Cap(WORDS)} modality: ${WORD} ${st.open.id} "${sess().title}", an infinite board ${WHO} pans and zooms (phone and desktop alike). `
       + `Actions, exactly:\n@add thread <thread id>\n@add threads   (the thread list)\n@add tinder\n@add projects [project id]\n@add file <file id> [| title]\n@add url <https address>\n`
-      + `@move <window id> <x> <y> [<w> <h>]   (snaps to a 24 px grid)\n@arrange [zone title]   (tidy grid, no overlap; with zones each zone on its own, or just the named one)\n`
+      + `Placement: a new window never covers another. End @add or @note with " in <zone title>" (an existing zone) to put it in that zone's next free slot (the zone grows); without it, it lands in an "Unsorted" zone below all zones (when the ${WORD} has zones). A later @move still places it exactly.\n`
+      + `@move <window id> <x> <y> [<w> <h>]   (snaps to a 24 px grid; onto another window it is nudged to the nearest free slot in the same zone)\n@arrange [zone title]   (tidy grid, no overlap; with zones each zone on its own, or just the named one)\n`
       + `@zone <title> <x> <y> <w> <h>   (a labelled frame behind windows; the same title moves/resizes it; a window belongs to the zone holding its centre)\n@unzone <title>   (remove the frame, windows stay)\n`
       + `@collapse <window id>   (also @fold)\n@expand <window id>   (also @unfold)\n@close <window id>\n@focus <window id>   (bring forward, pan to it)\n`
       + `@fit   (show all windows)\n@rename <${WORD} title>\n@back   (to the ${WORD} list)\n`
@@ -948,7 +998,9 @@ export function mount(box, ctx) {
       + `@memo <text>   (append to the hidden notes for this ${WORD}, shown to you at the top of every prompt: use for conventions ${WHO} agrees)\n@memo <window id> <text>   (append to that window's hidden notes)\n@memo-clear [window id]   (erase the ${WORD}'s notes, or that window's)\n`
       + `In notes, link files as [name](/k/files/<file id>) and pages as [name](https://...).\n` + commonOpen
       + `Windows on it (id | kind ref | title | position and size in board px):\n${ws || "(none)"}\n`
-      + `Zones (title | x y w h | windows):\n${zones().map(z => `- ${z.title} | ${z.x} ${z.y} ${z.w} ${z.h} | ${wins().filter(w => zoneOf(w) === z).map(w => w.id).join(" ") || "-"}`).join("\n") || "(none)"}\n`
+      + `Zones (title | x y w h | windows | next free slot for a note):\n${zones().map(z => { const p = P.slotIn(z, wins(), KINDS.note, zones());
+        return `- ${z.title} | ${z.x} ${z.y} ${z.w} ${z.h} | ${wins().filter(w => zoneOf(w) === z).map(w => w.id).join(" ") || "-"} | x ${p.x} y ${p.y}`; }).join("\n") || "(none)"}\n`
+      + (zones().length ? `Windows outside any zone: ${wins().filter(w => !zoneOf(w)).map(w => w.id).join(" ") || "none"}\n` : "")
       + `Visible area now: x ${Math.round(-v.x / v.z)} to ${Math.round((r.width - v.x) / v.z)}, y ${Math.round(-v.y / v.z)} to ${Math.round((r.height - v.y) / v.z)} (zoom ${Math.round(v.z * 100)} %)`
       + `${st.narrow ? "; on a phone" : ""}.\nRecent threads (id | title):\n${threads || "(none)"}]`;
   };
@@ -968,11 +1020,12 @@ export function mount(box, ctx) {
     }
     switch (name) {
       case "add": {
-        const [ref, title] = rest.join(" ").split("|").map(s => s.trim());
-        const w = addWin(first, ref || "", title || (first === "thread" ? threadTitle(ref) || "" : ""));
-        return `add ${w.id}`;
+        const [more, zone] = splitZone(rest.join(" "));
+        const [ref, title] = more.split("|").map(s => s.trim());
+        const w = addWin(first, ref || "", title || (first === "thread" ? threadTitle(ref) || "" : ""), { agent: true, zone });
+        return `add ${w.id} at x ${w.x} y ${w.y}${zoneOf(w) ? ` in ${zoneOf(w).title}` : ""}`;
       }
-      case "move": moveWin(first, rest[0], rest[1], rest[2], rest[3]); return `move ${first}`;
+      case "move": return `move ${first}${moveWin(first, rest[0], rest[1], rest[2], rest[3])}`;
       case "collapse": case "fold": setCollapsed(first, true); return `collapse ${first}`;
       case "expand": case "unfold": setCollapsed(first, false); return `expand ${first}`;
       case "close": closeWin(first); return `close ${first}`;
@@ -984,7 +1037,8 @@ export function mount(box, ctx) {
       case "unzone": { const z = dropZone(a); return `unzone ${z.id}`; }
       case "rename": await patchSession(st.open.id, { title: a || `Untitled ${WORD}` }); return "rename";
       case "back": ctx.levels.go(ME, ""); return "back";
-      case "note": { const w = addWin("note", text || "", a || "Note"); return `note ${w.id}`; }
+      case "note": { const [t, zone] = splitZone(a); const w = addWin("note", text || "", t || "Note", { agent: true, zone });
+        return `note ${w.id} at x ${w.x} y ${w.y}${zoneOf(w) ? ` in ${zoneOf(w).title}` : ""}`; }
       case "edit": setNote(first, text || rest.join(" ")); return `edit ${first}`;
       case "title": if (!rest.length) throw new Error("which name?"); setTitle(first, rest.join(" ")); return `title ${first}`;
       case "highlight": setHighlight(first, rest.join(" ")); return `highlight ${first}`;
