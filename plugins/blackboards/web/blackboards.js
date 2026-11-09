@@ -311,7 +311,9 @@ export function mount(box, ctx) {
     for (const [id, e] of st.els) if (!ids.has(id)) { e.el.remove(); st.els.delete(id); }
     for (const w of wins()) drawWin(w);
     drawZones();
-    wins().forEach(w => { const e = st.els.get(w.id).el; if (plane.lastChild !== e) plane.append(e); });
+    // only new windows are added: moving one in the DOM reloads its frame
+    // (a PDF or image flashed blank after every pan); stacking is z-index
+    wins().forEach(w => { const e = st.els.get(w.id).el; if (e.parentNode !== plane) plane.append(e); });
     if (!wins().length) plane.append(emptyHint); else emptyHint.remove();
     applyView();
   }
