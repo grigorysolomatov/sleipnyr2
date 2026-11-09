@@ -322,6 +322,34 @@ test("next thread from a view's conversation: the new one takes over the view, t
   expect(archived).toContain(old.id);
 });
 
+test("view histories: an automatic topic beside the title; a manual title is never touched", async () => {
+  const { isHistory } = await import("../plugins/chat/server.ts");
+  expect(isHistory({ view: "sessions" })).toBe(true);
+  expect(isHistory({ wasView: "sessions", hidden: true })).toBe(true);
+  expect(isHistory({ hidden: true, title: "sessions history (until 2026-11-09 08:55)" })).toBe(true);
+  expect(isHistory({ title: "sessions history (until 2026-11-09 08:55)" })).toBe(true); // brought back from the archive
+  expect(isHistory({ title: "Plans (until Friday)" })).toBe(false);
+  expect(isHistory({ title: "Plain thread" })).toBe(false);
+  const v = (await call("POST", "/p/chat/views/topictest/thread")).body;
+  const r = await call("POST", `/p/chat/threads/${v.id}/topic`, { topic: "Coral colour board layout." });
+  expect(r.status).toBe(200);
+  expect(r.body.data).toMatchObject({ topic: "Coral colour board layout", title: "topictest history", titleAuto: false });
+  // an ordinary thread has no topic; a user-named one keeps its name
+  const t = (await call("POST", "/p/chat/threads", {})).body;
+  await call("PATCH", `/p/chat/threads/${t.id}`, { title: "My own name" });
+  expect((await call("POST", `/p/chat/threads/${t.id}/topic`, { topic: "Agent topic" })).status).toBe(400);
+  expect((await call("GET", `/k/items/${t.id}`)).body.data).toMatchObject({ title: "My own name", titleAuto: false });
+  // a retired history (next thread) keeps its topic and is marked wasView
+  const items = app.store.items("next-thread");
+  const k = { items: { get: (id: string) => items.get(id), create: (t: string, d: object) => items.create(t, d), update: (id: string, p: object) => items.update(id, p as any) },
+    links: app.store.links() } as any;
+  const next = nextThread(k, v.id, "clear");
+  const old = (await call("GET", `/k/items/${v.id}`)).body.data;
+  expect(old).toMatchObject({ wasView: "topictest", hidden: true, topic: "Coral colour board layout" });
+  expect((next.data as any).topic).toBeUndefined();
+  expect((await call("POST", `/p/chat/threads/${v.id}/topic`, { topic: "Renamed topic" })).body.data.topic).toBe("Renamed topic");
+});
+
 test("chat: a message sent from another view keeps where it came from and what that view showed", async () => {
   const t = (await call("POST", "/p/chat/threads", {})).body;
   const out = await call("POST", `/p/chat/threads/${t.id}/messages`, { text: "which is newest?", from: "thread list", context: "[threads on screen: a, b]" });

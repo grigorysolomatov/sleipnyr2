@@ -543,7 +543,7 @@ export async function mount(root, ctx) {
   // ------------------------------------------------------------ live updates
   ctx.on("item", ({ item }) => {
     if (item.type === "thread") {
-      if (item.data.view) { if (item.data.view === emb.view) { st.viewThread = item; if (st.hist?.id === item.id) st.hist = item; else if (!isAlt()) pinHist(item); } } // never listed
+      if (item.data.view) { if (item.data.view === emb.view) { st.viewThread = item; if (st.hist?.id === item.id) { st.hist = item; setStripName(); } else if (!isAlt()) pinHist(item); } } // never listed
       else {
         const i = st.threads.findIndex(t => t.id === item.id);
         if (i >= 0) st.threads.splice(i, 1);
@@ -649,13 +649,16 @@ export async function mount(root, ctx) {
   const plain = t => String(t || "").replace(/ \(until [^)]*\)$/, ""); // a retired history is titled "<name> (until <time>)"
   const isAlt = () => !!st.hist && !st.hist.data.view;
   function setStripName() {
-    stripName.textContent = isAlt() ? plain(st.hist.data.title) || "Thread" : emb.title || `${emb.view} conversation`;
+    stripName.textContent = isAlt() ? st.hist.data.topic || plain(st.hist.data.title) || "Thread" : st.hist?.data.topic || emb.title || `${emb.view} conversation`;
     tmBtn.classList.toggle("alt", isAlt());
   }
 
   // ------------------------------------------------------------ threads menu of the embedded chat
   const dayTime = t => { const d = new Date(Number(t)), now = new Date();
     return d.toDateString() === now.toDateString() ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }) : d.toLocaleDateString([], { day: "numeric", month: "short" }); };
+  // when a next thread replaced it (its title ends "(until YYYY-MM-DD HH:MM)"); updated also moves when its topic is set
+  const retiredAt = t => { const m = / \(until (\d{4}-\d\d-\d\d) (\d\d:\d\d)\)$/.exec(t.data.title || "");
+    return m ? new Date(`${m[1]}T${m[2]}`).getTime() : t.updated; };
   let menuToken = 0;
   async function openMenu() {
     const mine = ++menuToken;
@@ -677,8 +680,8 @@ export async function mount(root, ctx) {
     const head = text => h("div", { class: "c-tm-h" }, text);
     tm.replaceChildren(
       head("Conversations here"),
-      own ? row(own, emb.title || `${emb.view} conversation`, "This view's own · " + dayTime(own.updated)) : null,
-      ...earlier.map(t => row(t, `${emb.title || "Earlier conversation"} (earlier)`, "Replaced by a new thread · " + dayTime(t.updated))),
+      own ? row(own, own.data.topic || emb.title || `${emb.view} conversation`, "This view's own · " + dayTime(own.updated)) : null,
+      ...earlier.map(t => row(t, t.data.topic || `${emb.title || "Earlier conversation"} (earlier)`, "Earlier · " + dayTime(retiredAt(t)))),
       recent.length ? head("Recent threads") : null,
       ...recent.map(t => row(t, t.data.title || "Thread", dayTime(t.updated))));
     placeMenu();

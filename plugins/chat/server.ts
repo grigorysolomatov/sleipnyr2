@@ -30,6 +30,8 @@ import type {
 } from "../../kernel/contract.ts";
 
 export interface Thread { title: string; titleAuto?: boolean; agent: string; state: Record<string, unknown>; hidden?: boolean; view?: string; unread?: boolean;
+  /** view histories (live or retired): an automatic topic, shown as their name in the embedded chat; the title stays */
+  topic?: string; wasView?: string;
   /** view threads: where the page last showed this conversation (level, sub, name), so any device can open it */
   place?: { level: string; sub: string; name: string } }
 export interface Action { name: string; args: string; body?: string }
@@ -68,6 +70,9 @@ export function titleFrom(text: string): string {
 export const RETITLE_AT = [1, 3, 6, 10], RETITLE_EVERY = 10;
 export const retitleDue = (n: number) => RETITLE_AT.includes(n) || (n > 10 && n % RETITLE_EVERY === 0);
 const TITLE_MAX = 40;
+/** A view's history thread, live or retired by a next thread (wasView; older ones only by their "(until ...)" title). */
+export const isHistory = (t: { view?: string | null; wasView?: string; hidden?: boolean; title?: string }) =>
+  !!(t.view || t.wasView || / history \(until \d{4}-\d\d-\d\d \d\d:\d\d\)$/.test(t.title || ""));
 /** Model/agent output -> a clean one-line title (<= 6 words, <= 40 chars), or "". */
 export function cleanTitle(s: string): string {
   let t = String(s || "").split(/\r?\n/).map(x => x.trim()).find(Boolean) || "";
@@ -232,6 +237,16 @@ class Chat {
     return this.k.items.get<Thread>(threadId)!;
   }
 
+  /** A view history's automatic topic (never the title: a user's name stays). POST /threads/:id/topic too. */
+  setTopic(threadId: string, raw: string) {
+    const t = this.k.items.get<Thread>(threadId);
+    if (!t || t.type !== "thread") throw new HttpError(404, "no such thread");
+    if (!isHistory(t.data)) throw new HttpError(400, "only a view's history thread has a topic");
+    const topic = cleanTitle(raw);
+    if (!topic) throw new HttpError(400, "topic required");
+    return t.data.topic === topic ? t : this.k.items.update<Thread>(threadId, { topic });
+  }
+
   /** Per-turn note for the agent: the thread id and how to rename it (only while the name is automatic). */
   private titleGuide(t: Item<Thread>): string {
     if (t.data.titleAuto === false) return "";
@@ -281,6 +296,7 @@ class Chat {
   /** After an agent reply: on a due turn, re-summarise an automatic title (fire and forget; failures are only logged). */
   private maybeRetitle(threadId: string) {
     const t = this.k.items.get<Thread>(threadId);
+    if (t && isHistory(t.data)) return this.maybeTopic(threadId);
     if (!t || t.data.titleAuto === false || this.retitling.has(threadId) || !this.agent.title) return;
     const n = this.messages(threadId).filter(m => m.data.role === "agent" && m.data.status === "done").length;
     if (!retitleDue(n)) return;
@@ -289,6 +305,36 @@ class Chat {
       .then(raw => { const c = cleanTitle(raw); if (c) this.setAutoTitle(threadId, c); }) // setAutoTitle re-checks: a manual rename meanwhile wins
       .catch(e => this.k.log("retitle failed:", (e as Error).message))
       .finally(() => this.retitling.delete(threadId));
+  }
+
+  /** View histories get a topic instead of a title: on the same due turns, or now (force) when it has none yet
+   *  (retired by a next thread, or older ones on start). One summary at a time; a failed one is not retried
+   *  until the next due turn or restart. */
+  private topicTried = new Set<string>();
+  private topicQueue: Promise<unknown> = Promise.resolve();
+  private maybeTopic(threadId: string, force = false) {
+    const t = this.k.items.get<Thread>(threadId);
+    if (!t || !isHistory(t.data) || this.retitling.has(threadId) || !this.agent?.title) return;
+    const n = this.messages(threadId).filter(m => m.data.role === "agent" && m.data.status === "done").length;
+    if (!n) return;
+    if (force ? t.data.topic || this.topicTried.has(threadId) : !retitleDue(n) && t.data.topic) return;
+    this.retitling.add(threadId); this.topicTried.add(threadId);
+    // a lookup that throws at once (agent unknown, agents off) must not reject the queue: an unhandled rejection stops the kernel
+    this.topicQueue = this.topicQueue
+      .then(() => this.agent.title!(t.data.agent, this.transcriptOf(threadId), AbortSignal.timeout(120000)))
+      .then(raw => { if (cleanTitle(raw)) this.setTopic(threadId, raw); })
+      .catch(e => this.k.log("topic failed:", (e as Error).message))
+      .finally(() => this.retitling.delete(threadId));
+  }
+  /** On start and whenever a history is retired: name every view history that has replies but no topic yet. */
+  watchTopics() {
+    for (const t of this.k.items.list<Thread>({ type: "thread", order: "-updated", limit: 10000 }))
+      if (isHistory(t.data) && !t.data.topic) this.maybeTopic(t.id, true);
+    const off = this.k.events.subscribe(ITEM_TOPIC, ev => {
+      const it = (ev as { item?: Item<Thread>; removed?: boolean }).item;
+      if (it?.type === "thread" && !(ev as { removed?: boolean }).removed && it.data.wasView && !it.data.topic) this.maybeTopic(it.id, true);
+    });
+    this.stopping.signal.addEventListener("abort", off);
   }
 
   /** The list: not hidden, not a view's history; hidden = only the hidden ones. */
@@ -625,7 +671,7 @@ let chat: Chat | null = null;
 class HttpError extends Error { constructor(readonly status: number, message: string) { super(message); } }
 
 const plugin: ServerPlugin = {
-  start(k) { chat = new Chat(k); chat.watchCalls(); chat.resumeAll(); },
+  start(k) { chat = new Chat(k); chat.watchCalls(); chat.resumeAll(); try { chat.watchTopics(); } catch (e) { k.log("topics:", e); } },
   routes(): Record<string, (req: Request, p: Record<string, string>) => Response | Promise<Response>> {
     const c = () => chat!;
     return {
@@ -647,6 +693,10 @@ const plugin: ServerPlugin = {
       "POST /threads/:id/title": async (req, p) => {
         const b = await req.json().catch(() => ({})) as { title?: string };
         try { return Response.json(c().agentTitle(p.id, b.title as string)); } catch (e) { return bad(e); }
+      },
+      "POST /threads/:id/topic": async (req, p) => {
+        const b = await req.json().catch(() => ({})) as { topic?: string };
+        try { return Response.json(c().setTopic(p.id, b.topic as string)); } catch (e) { return bad(e); }
       },
       "GET /threads/:id/messages": (_req, p) => Response.json(c().messages(p.id)),
       "POST /threads/:id/messages": async (req, p) => {

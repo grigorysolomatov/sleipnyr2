@@ -19,7 +19,7 @@ import type { Kernel, ServerPlugin } from "../../kernel/contract.ts";
 export const MODES = ["clear", "continue"] as const;
 export type Mode = (typeof MODES)[number];
 
-interface Thread { title: string; agent: string; state: Record<string, unknown>; from?: string; continues?: boolean; view?: string; titleAuto?: boolean }
+interface Thread { title: string; agent: string; state: Record<string, unknown>; from?: string; continues?: boolean; view?: string | null; wasView?: string; titleAuto?: boolean }
 
 class Refused extends Error { constructor(readonly status: number, message: string) { super(message); } }
 
@@ -29,7 +29,7 @@ export function nextThread(k: Kernel, fromId: string, mode: string) {
   if (!from || from.type !== "thread") throw new Refused(404, "no such thread");
   const view = from.data.view;
   // the retired history goes to the archive (Archived in the list), not among the open threads
-  if (view) k.items.update(from.id, { view: null, hidden: true, title: `${from.data.title} (until ${new Date().toLocaleString("sv-SE").slice(0, 16)})` });
+  if (view) k.items.update(from.id, { view: null, wasView: view, hidden: true, title: `${from.data.title} (until ${new Date().toLocaleString("sv-SE").slice(0, 16)})` });
   const t = k.items.create<Thread>("thread", { title: view ? from.data.title : "New thread", agent: from.data.agent, state: {},
     from: from.id, continues: mode === "continue", ...(view ? { view, titleAuto: false } : {}) });
   k.links.add(t.id, "from", from.id);
