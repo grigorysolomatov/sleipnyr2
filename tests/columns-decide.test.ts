@@ -14,7 +14,8 @@ afterAll(() => { app.stop(); rmSync(dir, { recursive: true, force: true }); });
 const items = app.store.items("columns");
 const made: { body: Record<string, unknown>; board: string }[] = [];
 let fail = false;
-const k = { items, config: { decideBoard: "inbox" }, user: { id: "me", name: "Me" }, app: { agentName: "Ag" } } as any;
+let on = true;
+const k = { items, config: { decideBoard: "inbox" }, user: { id: "me", name: "Me" }, app: { agentName: "Ag" }, settings: () => ({ features: { panelDecisions: on } }) } as any;
 const d = new Decisions(k, async (body, board) => { if (fail) throw new Error("proxy down"); made.push({ body, board }); return `t_${made.length}`; });
 
 const board = items.create("columns", { title: "Suggestions", columns: [{ id: "c1", title: "Research" }],
@@ -73,6 +74,16 @@ test("a failed card is still recorded, with the reason; refusals are clear", asy
 
 test("the route is mounted under /p/columns", async () => {
   const r = await app.fetch(new Request(`http://x/p/columns/${board.id}/decide`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ panel: "p3", verdict: "accept" }) }));
-  expect(r.status).toBe(400);
-  expect((await r.json()).error).toContain("takes no decisions");
+  expect(r.status).toBe(403); // mounted; the real app has panelDecisions off by default
+  expect((await r.json()).error).toContain("switched off");
+});
+
+test("decisions are refused while the panelDecisions switch is off", async () => {
+  on = false;
+  try {
+    const b = board;
+    const before = (items.get(b.id) as any).data.panels.find((x: any) => x.id === "p2").decide.state;
+    await expect(d.decide(b.id, { panel: "p2", verdict: "dismiss" })).rejects.toThrow(/switched off/);
+    expect((items.get(b.id) as any).data.panels.find((x: any) => x.id === "p2").decide.state).toBe(before);
+  } finally { on = true; }
 });

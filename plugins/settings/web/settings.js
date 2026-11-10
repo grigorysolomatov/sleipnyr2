@@ -43,6 +43,7 @@ const FEATURES = [
   ["replyPill", "Reply pill", "A pill names the view where the agent replied, tap to go there"],
   ["phoneTarget", "Bar target on the phone", "The bar shows which conversation it sends to, on small screens too"],
   ["recent", "Recent conversations", "The modality list shows the latest conversations at the top"],
+  ["panelDecisions", "Panel decisions", "Columns panels can carry Dismiss, Comment and Accept (off by default)"],
   ["recordingContext", "Recording context", "A voice message tells the agent what you looked at and tapped while recording"],
 ];
 const ROWS = GROUPS.flatMap(([, rows]) => rows);

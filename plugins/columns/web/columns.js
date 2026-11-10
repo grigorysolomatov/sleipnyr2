@@ -144,7 +144,9 @@ export function mount(box, ctx) {
   const panels = () => data()?.panels || [];
   const findP = id => panels().find(p => p.id === id);
   const inCol = cid => panels().filter(p => p.col === cid).sort((a, b) => a.order - b.order);
-  const dismissed = p => p.decide?.state === "dismissed";
+  // feature panelDecisions (Settings > Features): unlike other switches it is OFF unless turned on
+  const decOn = () => (ctx.settings?.().features?.panelDecisions ?? ctx.app?.features?.panelDecisions) === true;
+  const dismissed = p => decOn() && p.decide?.state === "dismissed";
   const shownIn = cid => inCol(cid).filter(p => st.showDis || !dismissed(p)); // dismissed ones wait at the column's foot
   // a column by id, by exact or loose title, or by its number (1 = leftmost)
   function findC(ref) {
@@ -346,7 +348,7 @@ export function mount(box, ctx) {
       + (last.comment ? `: “${last.comment.length > 140 ? last.comment.slice(0, 140) + "…" : last.comment}”` : "");
   }
   function drawDecide(p, e) {
-    const d = p.decide;
+    const d = decOn() ? p.decide : null;
     e.foot.hidden = !d; e.close.hidden = !!d; // a decided-on panel is never removed: dismiss archives it
     e.el.classList.toggle("decided", !!d && d.state !== "open");
     e.el.classList.toggle("dismissed", !!d && d.state === "dismissed");
@@ -386,7 +388,7 @@ export function mount(box, ctx) {
   }
   // the server records it on the panel (and makes the card); the board then takes its copy
   async function decide(id, verdict, comment) {
-    const e = st.els.get(id), p = findP(id); if (!e || !p?.decide || e.busy) return;
+    const e = st.els.get(id), p = findP(id); if (!decOn() || !e || !p?.decide || e.busy) return;
     const open = e.say && !e.say.hidden ? e.say.querySelector("textarea").value.trim() : "";
     comment = comment ?? (verdict === "accept" ? open : "");
     e.busy = { accept: "Accepting…", dismiss: "Dismissing…", comment: "Sending…", reopen: "Reopening…" }[verdict];
@@ -849,7 +851,7 @@ export function mount(box, ctx) {
     await loadThreads();
     const at = cols()[atIdx()];
     const cs = cols().map((c, i) => `Column ${i + 1}: ${c.id} | ${c.title}${c.id === at?.id ? " | on screen" : ""}\n`
-      + (inCol(c.id).map(p => `  - ${p.id} | ${p.kind}${p.ref ? " " + p.ref : ""} | ${pTitle(p)}${p.collapsed ? " | folded" : ""}${data().highlight?.id === p.id ? " | highlighted" : ""}${p.fresh ? " | marked new" : ""}${p.decide ? ` | decision: ${p.decide.state}${p.decide.log?.length ? ` (${decideLine(p.decide)})` : ""}` : ""}`
+      + (inCol(c.id).map(p => `  - ${p.id} | ${p.kind}${p.ref ? " " + p.ref : ""} | ${pTitle(p)}${p.collapsed ? " | folded" : ""}${data().highlight?.id === p.id ? " | highlighted" : ""}${p.fresh ? " | marked new" : ""}${decOn() && p.decide ? ` | decision: ${p.decide.state}${p.decide.log?.length ? ` (${decideLine(p.decide)})` : ""}` : ""}`
         + (p.kind === "note" ? `\n     text:\n${clip(p.text || "(empty)", NOTE_SHOWN).replace(/^/gm, "       ")}` : "")).join("\n") || "  (empty)")).join("\n");
     const threads = st.threads.slice(0, 25).map(t => `- ${t.id} | ${t.data.title || ""}`).join("\n");
     const notes = data().agentNotes ? `[Agent notes, hidden from ${WHO}'s view, kept with the columns]\n${data().agentNotes}\n[End of agent notes]\n\n` : "";
@@ -864,9 +866,9 @@ export function mount(box, ctx) {
       + `@move <panel id> <column> [position]   (position 1 = top; without it, the bottom)\n`
       + `@collapse <panel id>   (also @fold)\n@expand <panel id>   (also @unfold)\n@close <panel id>\n@title <panel id> <name>\n@focus <panel id>   (swipe to it and scroll it into view)\n`
       + `@highlight <panel or column id> [why]   (pink "look here" frame, one at a time)\n@unhighlight\n@new <panel id> [why]   (green "new" frame)\n@unnew <panel id>\n`
-      + `@suggest <column> [board=<kanban board>] <title>   (a suggested task: a note with Dismiss, Comment and Accept at its foot; text on the next lines, then @end: what you would do, why it is worth it, rough effort, what ${WHO} must provide)\n`
+      + (decOn() ? `@suggest <column> [board=<kanban board>] <title>   (a suggested task: a note with Dismiss, Comment and Accept at its foot; text on the next lines, then @end: what you would do, why it is worth it, rough effort, what ${WHO} must provide)\n`
       + `@decide <panel id> [kanban board]   (give any panel Dismiss, Comment and Accept)\n`
-      + `${WHO}'s decisions are recorded on the panel and reach you as unassigned Kanban cards; never decide for ${WHO}.\n`
+      + `${WHO}'s decisions are recorded on the panel and reach you as unassigned Kanban cards; never decide for ${WHO}.\n` : "")
       + `@memo <text>   (append to this board's hidden notes, shown to you at the top of every prompt from this board; for conventions ${WHO} agrees)\n@memo-clear\n`
       + `@rename-board <title>\n@back   (to the board list)\n`
       + `In notes, link files as [name](/k/files/<file id>) and pages as [name](https://...).\n`
@@ -925,6 +927,7 @@ export function mount(box, ctx) {
       }
       case "memo-clear": data().agentNotes = ""; return "memo-clear";
       case "suggest": {
+        if (!decOn()) return "suggest ignored (panel decisions are off)";
         const c = needC(first); let words = rest;
         let board = "";
         if (/^board=/.test(words[0] || "")) { board = words[0].slice(6); words = words.slice(1); }
@@ -933,6 +936,7 @@ export function mount(box, ctx) {
         drawPanel(np); return `suggest ${np.id}`;
       }
       case "decide": {
+        if (!decOn()) return "decide ignored (panel decisions are off)";
         const dp = needP(first);
         if (!dp.decide) dp.decide = { state: "open", log: [] };
         if (rest[0] && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(rest[0])) dp.decide.board = rest[0];

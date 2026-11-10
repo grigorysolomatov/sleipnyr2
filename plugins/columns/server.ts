@@ -47,7 +47,11 @@ export class Decisions {
     return p;
   }
 
+  /** feature panelDecisions (Settings > Features, default OFF): off = decisions are refused, panel data stays */
+  private enabled() { try { return this.k.settings().features.panelDecisions === true; } catch { return false; } }
+
   async decide(boardId: string, b: { panel?: unknown; verdict?: unknown; comment?: unknown }) {
+    if (!this.enabled()) throw new Refused(403, "panel decisions are switched off (Settings > Features > Panel decisions)");
     const verdict = String(b.verdict || "") as Verdict, comment = clip(b.comment, 4000), pid = String(b.panel || "");
     if (!VERDICTS.has(verdict)) throw new Refused(400, "verdict must be accept, dismiss, comment or reopen");
     if (verdict === "comment" && !comment) throw new Refused(400, "an empty comment");
