@@ -10,6 +10,8 @@
 //   message  {thread, role, text, files, voice?, transcript?, status, error?, from?, context?}
 //            from = the view the message was sent from when not this thread (e.g. "thread list"),
 //            context = what that view showed; it goes to the agent with the message, not shown
+//            recording = what the user saw and did while recording a voice message
+//              (plugins/chat/recording.ts; feature recordingContext), also only for the agent
 //            role "user" | "agent"; status "queued" | "transcribing" | "working" | "done" | "error"
 //            actions (agent replies in a view thread): the reply's "@name args" lines, taken out of its
 //            text, for the view to run [{name, args}]; actionsDone = what the view reported back
@@ -25,6 +27,7 @@
 //   "MEDIA:/abs/path" are fetched from it, saved as files of the reply and
 //   removed from its text.
 import { bad, ITEM_TOPIC } from "../../kernel/contract.ts";
+import { cleanRecording, recordingNote, FEATURE as RECORDING, type Recording } from "./recording.ts";
 import type {
   AgentService, AgentTurn, AttachedFile, FileData, Item, Kernel, ServerPlugin, TranscribeService,
 } from "../../kernel/contract.ts";
@@ -39,7 +42,7 @@ export interface Action { name: string; args: string; body?: string }
 export interface CallNote { id: string; text: string }
 export interface Message {
   thread: string; role: "user" | "agent"; text: string; files: string[];
-  voice?: string; transcript?: string; reply?: string; from?: string; context?: string; actions?: Action[]; calls?: CallNote[];
+  voice?: string; transcript?: string; reply?: string; from?: string; context?: string; recording?: Recording; actions?: Action[]; calls?: CallNote[];
   actionsDone?: string[]; // what the view reported for each action ("ok: ..." / "failed: ..."; ["running"] = claimed)
   status: "queued" | "transcribing" | "working" | "done" | "error" | "stopped" | "cancelled"; error?: string;
   // stopped (agent reply): stopped by the user; skipped = it never ran. cancelled (user message): never sent.
@@ -389,7 +392,7 @@ class Chat {
 
   /** Saves the user's message and a placeholder reply, then runs the turn in the background. */
   /** view.transcript: the voice was already transcribed (hands-free talk mode), so the turn skips hearing. */
-  post(threadId: string, text: string, files: string[], voice?: string, view?: { from?: string; context?: string; transcript?: string }, mode = "queue", extra: Partial<Message> = {}) {
+  post(threadId: string, text: string, files: string[], voice?: string, view?: { from?: string; context?: string; transcript?: string; recording?: unknown }, mode = "queue", extra: Partial<Message> = {}) {
     if (mode !== "queue" && mode !== "now") throw new Error("mode must be queue or now");
     const thread = this.k.items.get<Thread>(threadId);
     if (!thread || thread.type !== "thread") throw new Error("no such thread");
@@ -399,9 +402,10 @@ class Chat {
     const heard = voice && typeof view?.transcript === "string" ? view.transcript.slice(0, 20000) : undefined;
     if (!this.messages(threadId).length) this.setAutoTitle(threadId, titleFrom(text || heard || ""));
     const from = String(view?.from || "").slice(0, 60), context = String(view?.context || "").slice(0, 20000);
+    const recording = voice && this.recordingOn() ? cleanRecording(view?.recording) : null;
     const user = this.k.items.create<Message>("message", { thread: threadId, role: "user", text, files, voice,
       status: voice && heard === undefined ? "transcribing" : "done", ...(heard !== undefined ? { transcript: heard } : {}),
-      ...(from ? { from } : {}), ...(context ? { context } : {}), ...extra });
+      ...(from ? { from } : {}), ...(context ? { context } : {}), ...(recording ? { recording } : {}), ...extra });
     const reply = this.k.items.create<Message>("message", { thread: threadId, role: "agent", text: "", files: [], status: "queued" });
     this.k.items.update(user.id, { reply: reply.id });
     this.k.links.add(user.id, "in", threadId);
@@ -446,7 +450,7 @@ class Chat {
     try {
       if (!(await this.hear(job, ctl.signal))) { this.drop(job); return; }
       const a = l.active, user = this.k.items.get<Message>(job.userId)!, thread = this.k.items.get<Thread>(job.threadId)!;
-      const text = this.promptOf(user) + (user.data.context ? `\n\n${user.data.context}` : "");
+      const text = this.promptOf(user) + this.contextOf(user);
       if (a && a.stage === "working" && text.trim() && !user.data.files.length && this.agent.steer) {
         const ok = await this.agent.steer(thread.data.agent, a.state, text).catch(e => { this.k.log("steer failed:", e); return false; });
         if (ok && l.active === a) {
@@ -553,6 +557,15 @@ class Chat {
     }
   }
 
+  /** feature recordingContext (Settings > Features, default on) */
+  private recordingOn() { try { return this.k.settings().features[RECORDING] !== false; } catch { return true; } }
+  /** what goes after a user message for the agent only: the view's context, then the recording timeline */
+  private contextOf(user: Item<Message>) {
+    const ctx = user.data.context || "";
+    const rec = user.data.recording && this.recordingOn() ? recordingNote(user.data.recording, ctx) : "";
+    return [ctx, rec].filter(Boolean).map(s => `\n\n${s}`).join("");
+  }
+
   /** One user message -> one agent reply. resumed = continue a run started before a restart. */
   private async turn(job: Job, a: Active) {
     const { threadId, userId, replyId, resumed } = job;
@@ -561,7 +574,7 @@ class Chat {
     const user = this.k.items.get<Message>(userId)!;
     let text = this.promptOf(user);
     if (!text.trim() && !user.data.files.length) return fail("nothing to send: no speech recognised");
-    if (user.data.context) text += `\n\n${user.data.context}`;
+    text += this.contextOf(user);
 
     const thread = this.k.items.get<Thread>(threadId)!;
     text = this.actionsNote(thread, userId, replyId) + text;
@@ -700,7 +713,7 @@ const plugin: ServerPlugin = {
       },
       "GET /threads/:id/messages": (_req, p) => Response.json(c().messages(p.id)),
       "POST /threads/:id/messages": async (req, p) => {
-        const b = await req.json() as { text?: string; files?: string[]; voice?: string; from?: string; context?: string; transcript?: string; mode?: string };
+        const b = await req.json() as { text?: string; files?: string[]; voice?: string; from?: string; context?: string; transcript?: string; mode?: string; recording?: unknown };
         try { return Response.json(c().post(p.id, String(b.text || ""), b.files || [], b.voice, b, b.mode || "queue"), { status: 201 }); }
         catch (e) { return bad(e); }
       },

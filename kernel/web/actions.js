@@ -88,8 +88,10 @@ export function createActions(ctx, root) {
     return () => { handlers.delete(`${plugin}/${name}`); accepts.delete(`${plugin}/${name}`); claims.delete(`${plugin}/${name}`); };
   };
   const views = new Map(); // level id -> what the view adds to the generic actions
-  viewActions(ctx, root, handle, views);
+  const va = viewActions(ctx, root, handle, views);
   return {
+    /** the view on screen as view_describe lists it (text) */
+    describe: () => va.describe(),
     /** register what one declared action does on this page (accept: args => whether this page answers) */
     handle,
     /** a view's own part of the generic view_* actions (see the top of this file) */
@@ -149,8 +151,9 @@ function viewActions(ctx, root, handle, views) {
     + (targets.some(id => views.get(level())?.has?.(id)) ? " (it is there but hidden: view_focus brings it up first)" : "");
 
   // ---- describe
-  handle("view", "describe", async ({ view }) => {
-    await open(view);
+  handle("view", "describe", async ({ view }) => { await open(view); return describeNow(); }, () => !framed());
+  // what view_describe says about the view on screen now (also the recording context's snapshots)
+  async function describeNow() {
     const seen = new Set(), rows = [];
     const vh = innerHeight, vw = innerWidth, can = !!views.get(level())?.order;
     for (const e of boxes().flatMap(b => [...b.querySelectorAll("[data-k-id]")])) {
@@ -167,7 +170,7 @@ function viewActions(ctx, root, handle, views) {
     const sub = ctx.levels?.sub() || "";
     return [`view: ${level()}${sub ? "/" + sub : ""} on a ${vw}x${vh} page; ${rows.length} items`,
       ...rows.slice(0, 150), rows.length > 150 ? `(+${rows.length - 150} more)` : ""].filter(Boolean).join("\n");
-  }, () => !framed());
+  }
 
   // ---- marks: one map (item id -> mark, a later call takes over), one style rebuilt from it
   const marks = new Map(), style = effectStyle();
@@ -405,6 +408,7 @@ function viewActions(ctx, root, handle, views) {
     a.currentTime = to_s;
     return `moved ${target}${ps.length > 1 ? ` player ${index}` : ""} to ${fmt(to_s)} (${a.paused ? "paused" : "playing"})`;
   }, mediaAccept, { claim: true });
+  return { describe: describeNow };
 }
 
 /** every <audio>/<video> inside an element, also inside its same-origin frames */

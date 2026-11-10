@@ -4,8 +4,10 @@
 //
 //   const bar = createBar(ctx)       the shell does this once; ctx.bar = bar
 //   bar.offer({ id, label, send, shown?, placeholder?, busy? }) -> withdraw()
-//       send({ text, files, voice, mode? }) -> Promise   files = attached file ids,
+//       send({ text, files, voice, mode?, recording? }) -> Promise   files = attached file ids,
 //         voice = file id of a recording (or undefined); reject = not sent
+//         recording = what the person saw and did while recording a voice
+//         message (web/recctx.js; only with voice, feature recordingContext)
 //         mode = "queue" | "now", only when busy() said a turn runs there:
 //         a choice popover at the send button asked (Esc / Enter / outside = queue)
 //       shown() -> whether the view is on screen now (default: always)
@@ -38,6 +40,7 @@
 // a touch keyboard = new line). Paste or drop files (any type) anywhere; the
 // + picker takes any file. Images show as thumbnails, other files as chips.
 import { startRecording, MAX_SECONDS } from "./voice.js";
+import { watchRecording } from "./recctx.js";
 
 const svg = s => { const t = document.createElement("template"); t.innerHTML = s; return t.content.firstChild; };
 const MIC = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg>';
@@ -334,7 +337,7 @@ export function createBar(ctx, app) {
     say(""); left = Infinity;
     try {
       b.recording = "starting";
-      b.recording = await startRecording({
+      const rec = await startRecording({
         onTick: s => {
           recTime.textContent = clock(s);
           left = MAX_SECONDS - s; // the last 30 s count down to the automatic send
@@ -347,6 +350,10 @@ export function createBar(ctx, app) {
         },
         onLimit: () => stopVoice(true), // the recorder stopped at its limit: send what we have
       });
+      // what the person sees and does meanwhile goes with the message (Settings > Features)
+      let watch = null;
+      if (ctx.feature?.("recordingContext")) try { watch = watchRecording(ctx); } catch (e) { console.warn("recording context:", e); }
+      b.recording = { stop: () => rec.stop(), cancel: () => { watch?.cancel(); return rec.cancel(); }, watch };
       recTime.textContent = "0:00"; form.classList.add("rec"); recBar.hidden = false;
     } catch (e) { b.recording = null; say(e.message, true); }
   }
@@ -356,11 +363,14 @@ export function createBar(ctx, app) {
     if (!rec || rec === "starting") return;
     b.recording = null; form.classList.remove("rec"); recBar.hidden = true;
     const file = keep ? await rec.stop() : await rec.cancel();
+    let recording = null; // never let the context log stop a send
+    if (keep && rec.watch) try { recording = await Promise.race([rec.watch.stop(), new Promise(ok => setTimeout(() => ok(null), 1500))]); } catch (e) { console.warn("recording context:", e); }
     if (!file) return keep && say("Nothing was recorded.", true);
     sentFx(); form.classList.add("sending");
     const files = b.pending; // attachments waiting in the tray go with the voice message
     const rec0 = { id: `v${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, blob: file, name: file.name, type: file.type,
-      text: ta.value.trim(), href: location.pathname + location.hash, target: current, voice: null, files: [], mode: "" };
+      text: ta.value.trim(), href: location.pathname + location.hash, target: current, voice: null, files: [], mode: "",
+      ...(recording ? { recording } : {}) };
     await outbox.put(rec0); // on disk first: a reload from here on loses nothing
     try {
       const voice = await ctx.upload(file);
@@ -371,7 +381,7 @@ export function createBar(ctx, app) {
       rec0.files = files.map(p => p.id); await outbox.put(rec0);
       const mode = await whenMode();
       rec0.mode = mode || ""; await outbox.put(rec0);
-      await deliver({ text: rec0.text, voice: voice.id, files: rec0.files, ...(mode ? { mode } : {}) });
+      await deliver({ text: rec0.text, voice: voice.id, files: rec0.files, ...(mode ? { mode } : {}), ...(recording ? { recording } : {}) });
       await outbox.del(rec0.id);
       form.classList.remove("sending");
       ta.value = ""; grow();
@@ -401,7 +411,7 @@ export function createBar(ctx, app) {
         const voice = r.voice ? { id: r.voice }
           : await ctx.upload(new File([r.blob], r.name, { type: r.type }));
         if (!r.voice) { r.voice = voice.id; await outbox.put(r); }
-        await deliver({ text: r.text, voice: voice.id, files: r.files || [], ...(r.mode ? { mode: r.mode } : {}) });
+        await deliver({ text: r.text, voice: voice.id, files: r.files || [], ...(r.mode ? { mode: r.mode } : {}), ...(r.recording ? { recording: r.recording } : {}) });
         await outbox.del(r.id); say("");
       } catch (e) { say(`Voice message still not sent: ${e.message}`, true); return; }
     }

@@ -374,6 +374,21 @@ test("chat: a message sent from another view keeps where it came from and what t
   expect(plain.body.user.data.from).toBeUndefined();
 });
 
+test("chat: a voice message keeps its recording context, unless the switch is off", async () => {
+  const t = (await call("POST", "/p/chat/threads", {})).body;
+  const voice = (await call("POST", "/k/files?name=v.webm", new Uint8Array([1, 2, 3, 4]), "audio/x-test")).body.id;
+  const recording = { ms: 9000, events: [{ t: 0, text: "on Columns 'Work'" }, { t: 4000, text: "folded p6 'Jobs'" }], snaps: [] };
+  const on = await call("POST", `/p/chat/threads/${t.id}/messages`, { text: "", voice, transcript: "look at this", recording });
+  expect(on.status).toBe(201);
+  expect(on.body.user.data.recording.events[1]).toEqual({ t: 4000, text: "folded p6 'Jobs'" });
+  // only with a voice message
+  expect((await call("POST", `/p/chat/threads/${t.id}/messages`, { text: "typed", recording })).body.user.data.recording).toBeUndefined();
+  await call("PATCH", "/k/settings", { features: { recordingContext: false } });
+  const off = await call("POST", `/p/chat/threads/${t.id}/messages`, { text: "", voice, transcript: "again", recording });
+  expect(off.body.user.data.recording).toBeUndefined();
+  await call("PATCH", "/k/settings", { features: { recordingContext: null } });
+});
+
 // ---- the thread list acts on itself (HCP) ----
 import { extractActions } from "../plugins/chat/server.ts";
 
