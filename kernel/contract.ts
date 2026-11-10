@@ -241,8 +241,10 @@ export interface Kernel {
 
 /** App settings changed by hand in Settings (one kernel-owned item of type "settings").
  *  features: on/off per switch, over the config's app.features (default on).
- *  allowDelete: deleting archived things for good (default off). */
-export interface AppSettings { allowDelete: boolean; features: Record<string, boolean> }
+ *  allowDelete: deleting archived things for good (default off).
+ *  pickerHidden: modality ids left out of the picker (the config's app.pickerHidden
+ *  until Settings sets it). */
+export interface AppSettings { allowDelete: boolean; features: Record<string, boolean>; pickerHidden: string[] }
 export const SETTINGS_TYPE = "settings";
 
 export type Handler = (req: Request, params: Record<string, string>) => Response | Promise<Response>;

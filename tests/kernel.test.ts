@@ -111,6 +111,9 @@ test("settings: kernel item, deletion off by default, features over the config",
   expect((await call("PATCH", "/k/settings", { features: { recent: false } })).body.features.recent).toBe(false);
   expect((await call("GET", "/k/plugins")).body.settings.features.recent).toBe(false);
   expect((await call("PATCH", "/k/settings", { features: { recent: null } })).body.features.recent).toBeUndefined();
+  expect((await call("PATCH", "/k/settings", { pickerHidden: ["no-such-modality"] })).status).toBe(400);
+  expect((await call("PATCH", "/k/settings", { pickerHidden: "projects" })).status).toBe(400);
+  expect(Array.isArray((await call("GET", "/k/settings")).body.pickerHidden)).toBe(true);
 });
 
 test("the old theme address still works", async () => {

@@ -19,7 +19,7 @@ const BUILD = basename(realpathSync(ROOT));
 export interface Config {
   listen: { host: string; port: number };
   dataDir: string;
-  app: { name: string; shortName: string; home: string; agentName?: string; features?: Record<string, boolean> }; // home = plugin shown at "/"; agentName = how the UI names the agent
+  app: { name: string; shortName: string; home: string; agentName?: string; features?: Record<string, boolean>; pickerHidden?: string[] }; // home = plugin shown at "/"; agentName = how the UI names the agent
   user: { id: string; name: string };
   plugins: Record<string, Record<string, unknown>>; // enabled plugins and their settings
   actions?: ActionsConfig; // which agents may call the plugins' declared actions (kernel/actions.ts)
@@ -175,9 +175,10 @@ export async function createApp(config: Config) {
     const features: Record<string, boolean> = {};
     for (const [k, v] of Object.entries(config.app.features || {})) features[k] = v !== false;
     for (const [k, v] of Object.entries(d.features || {})) if (typeof v === "boolean") features[k] = v;
-    return { allowDelete: d.allowDelete === true, features };
+    const pickerHidden = Array.isArray(d.pickerHidden) ? d.pickerHidden : config.app.pickerHidden || [];
+    return { allowDelete: d.allowDelete === true, features, pickerHidden };
   };
-  const setSettings = (b: { allowDelete?: unknown; features?: unknown }): AppSettings => {
+  const setSettings = (b: { allowDelete?: unknown; features?: unknown; pickerHidden?: unknown }): AppSettings => {
     const patch: Record<string, unknown> = {};
     if (b.allowDelete !== undefined) {
       if (typeof b.allowDelete !== "boolean") throw Object.assign(new Error("allowDelete must be true or false"), { status: 400 });
@@ -192,7 +193,15 @@ export async function createApp(config: Config) {
       }
       patch.features = f;
     }
-    if (!Object.keys(patch).length) throw Object.assign(new Error("allowDelete or features required"), { status: 400 });
+    if (b.pickerHidden !== undefined) {
+      const known = new Set(plugins.filter(p => p.manifest.modality).map(p => p.manifest.id));
+      const v = b.pickerHidden;
+      if (v === null) patch.pickerHidden = null; // back to the config default
+      else if (!Array.isArray(v) || v.some(x => typeof x !== "string" || !known.has(x)))
+        throw Object.assign(new Error("pickerHidden must be a list of modality ids"), { status: 400 });
+      else patch.pickerHidden = [...new Set(v as string[])];
+    }
+    if (!Object.keys(patch).length) throw Object.assign(new Error("allowDelete, features or pickerHidden required"), { status: 400 });
     const cur = settingsItem();
     if (cur) kItems.update(cur.id, patch); else kItems.create(SETTINGS_TYPE, { allowDelete: false, features: {}, ...patch });
     return settings();

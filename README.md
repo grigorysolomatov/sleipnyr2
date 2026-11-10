@@ -162,6 +162,7 @@ The `settings` plugin (formerly `theme`; the old name, `/p/theme` and
 `/m/theme` still work) is the Settings modality, set by hand:
 
 - Theme: the look (below).
+- Picker: one "Show in picker" switch per modality.
 - Features: the app's on/off switches. The config's `app.features` gives the
   defaults; a change in Settings overrides it for every device.
 - Data: `allowDelete`, off by default. When on, archived threads get a delete
@@ -171,9 +172,12 @@ The `settings` plugin (formerly `theme`; the old name, `/p/theme` and
   messages and links, and each uploaded file that nothing else refers to.
 
 Features and Data are one kernel-owned item (type `settings`):
-`GET /k/settings` -> `{allowDelete, features}`, `PATCH /k/settings` with
+`GET /k/settings` -> `{allowDelete, features, pickerHidden}`, `PATCH /k/settings` with
 `{"allowDelete": true}` or `{"features": {"recent": false}}` (null = back to
-the config default). Pages follow a change live.
+the config default). `pickerHidden` is a list of modality ids left out of the
+picker (they stay reachable by address); unknown ids are refused with 400, null
+= back to the config's `app.pickerHidden`. Settings > Picker has one switch per
+modality. Pages follow a change live.
 
 ### Theme
 

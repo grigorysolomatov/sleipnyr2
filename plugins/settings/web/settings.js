@@ -64,6 +64,7 @@ const svg = s => { const t = document.createElement("template"); t.innerHTML = s
 export function mount(box, ctx) {
   const AG = ctx.app.agentName;
   const st = { tokens: {}, defaults: {}, pending: {}, timer: 0, saving: null, fields: new Map(), app: ctx.settings?.() || { allowDelete: false, features: {} } };
+  const pickerMods = () => (ctx.plugins || []).filter(p => p.modality).map(p => ({ id: p.id, title: p.modality.title || p.name }));
   const rootStyle = document.documentElement.style;
 
   const back = backButton({ cls: "tm-back", tip: "All modalities", onclick: () => ctx.levels.up() });
@@ -134,6 +135,13 @@ export function mount(box, ctx) {
   const drawFeatureRows = () => featRows.replaceChildren(...featureNames().map(([k, name, doc]) =>
     toggle(`feature.${k}`, name, doc, () => st.app.features?.[k] !== false, on => saveApp({ features: { [k]: on } }))));
   drawFeatureRows();
+  // Picker: one 'Show in picker' switch per modality (hidden ones stay reachable by address)
+  const hiddenIds = () => st.app.pickerHidden || ctx.app?.pickerHidden || [];
+  const pickRows = h("ul", { class: "tm-rows", role: "list" });
+  const drawPickRows = () => pickRows.replaceChildren(...pickerMods().map(m =>
+    toggle(`picker.${m.id}`, m.title, "Show in picker", () => !hiddenIds().includes(m.id),
+      on => saveApp({ pickerHidden: [...hiddenIds().filter(x => x !== m.id), ...(on ? [] : [m.id])] }))));
+  drawPickRows();
   const dataRows = h("ul", { class: "tm-rows", role: "list" },
     toggle("data.allowDelete", "Allow deleting", "Archived threads get a delete button; deleting is for good",
       () => st.app.allowDelete === true, on => saveApp({ allowDelete: on })));
@@ -142,6 +150,7 @@ export function mount(box, ctx) {
   body.append(
     section("Theme", preview, list),
     section("Features", h("section", { class: "tm-group" }, featRows)),
+    section("Picker", h("section", { class: "tm-group" }, pickRows)),
     section("Data", h("section", { class: "tm-group" }, dataRows)));
 
   function drawApp() {
@@ -154,16 +163,17 @@ export function mount(box, ctx) {
   async function saveApp(patch) {
     const before = st.app;
     st.app = { ...st.app, ...(patch.allowDelete !== undefined ? { allowDelete: patch.allowDelete } : {}),
-      features: { ...st.app.features, ...(patch.features || {}) } };
+      features: { ...st.app.features, ...(patch.features || {}) },
+      ...(patch.pickerHidden !== undefined ? { pickerHidden: patch.pickerHidden } : {}) };
     drawApp(); say("");
     try { st.app = await ctx.api("/k/settings", { method: "PATCH", json: patch }); drawApp(); }
     catch (e) { st.app = before; drawApp(); say(`Not saved: ${e.message}`, true); }
   }
   async function loadApp() {
-    try { st.app = await ctx.api("/k/settings"); drawFeatureRows(); drawApp(); }
+    try { st.app = await ctx.api("/k/settings"); drawFeatureRows(); drawPickRows(); drawApp(); }
     catch (e) { say(`Could not load the settings: ${e.message}`, true); }
   }
-  ctx.onSettings?.(s => { st.app = s; drawFeatureRows(); drawApp(); });
+  ctx.onSettings?.(s => { st.app = s; drawFeatureRows(); drawPickRows(); drawApp(); });
   drawApp();
 
   function drawAll() {

@@ -191,7 +191,11 @@ function createLevels(ctx, view, home, mods) {
 
 // The picker: one row per composed modality (symbol, title, what it is), its
 // own conversation in the embedded chat underneath, and the bar talks to it.
-function picker(ctx, box, mods, lv) {
+function picker(ctx, box, all, lv) {
+  // pickerHidden: modality ids left out of the picker (still reachable by address); the
+  // Settings value when set, else the config's app.pickerHidden; re-read on every draw
+  const hidden = () => ctx.settings().pickerHidden || ctx.app.pickerHidden || [];
+  let mods = all.filter(p => !hidden().includes(p.id));
   const list = el("ul", { class: "k-mods", role: "list" });
   box.append(el("header", { class: "k-bar" }, el("b", { class: "k-app" }, ctx.app.shortName)), list);
   let recent = [], more = false, recentSoon = 0;
@@ -223,7 +227,8 @@ function picker(ctx, box, mods, lv) {
     "data-tip": `Open ${p.modality.title || p.name}`, onclick: e => { e.preventDefault(); ctx.levels.show(p.id); } },
     el("span", { class: "k-mod-ic", "aria-hidden": "true" }, svgEl(p.modality.icon)),
     el("span", { class: "k-mod-t" }, el("b", {}, p.modality.title || p.name), p.modality.doc ? el("small", {}, p.modality.doc) : null))));
-  const draw = () => list.replaceChildren(...[...recentRows(), ...modRows()].filter(Boolean));
+  const draw = () => { mods = all.filter(p => !hidden().includes(p.id)); list.replaceChildren(...[...recentRows(), ...modRows()].filter(Boolean)); };
+  ctx.onSettings(() => { if (ctx.levels.current() === PICKER) draw(); else mods = all.filter(p => !hidden().includes(p.id)); });
   const describe = () => `[Sent from the Sleipnyr modality picker: the top level, a list of the ways to work with ${ctx.app.agentName} `
     + `("composed modalities"). On screen (id | title | what it is):\n${mods.map(p => `- ${p.id} | ${p.modality.title || p.name} | ${p.modality.doc || ""}`).join("\n")}\n`
     + `Came here from: ${lv.from() || "(start)"}. This chat is the picker's own history; the picker acts on your reply. `
@@ -269,7 +274,7 @@ async function boot() {
     // feature switches: Settings > Features (kernel settings item) over the app config; default on
     feature: name => (info.settings?.features?.[name] ?? info.app.features?.[name]) !== false,
     // the app settings changed by hand in Settings: {allowDelete, features}; kept fresh live
-    settings: () => info.settings || { allowDelete: false, features: {} },
+    settings: () => info.settings || { allowDelete: false, features: {}, pickerHidden: null },
     fileUrl: id => `/k/files/${encodeURIComponent(id)}`,
     address: id => `/i/${encodeURIComponent(id)}`,
     go: id => history.pushState({}, "", `/i/${encodeURIComponent(id)}`),
