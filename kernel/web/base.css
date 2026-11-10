@@ -129,3 +129,6 @@ pre:has(> .tx-copy) > code { white-space: pre-wrap; overflow-wrap: anywhere; }
 .k-row:hover { background: var(--surface); }
 .k-row.here { border-left-color: var(--accent-here); background: var(--surface); }
 .k-back svg { width: 1.35rem; height: 1.35rem; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+/* bullet = title line + muted detail lines (text.js render: chat, columns, blackboards) */
+.c-li-h { color: var(--text); }
+.c-li-d { color: var(--text-muted); font-size: .92em; line-height: 1.45; margin-top: 1px; }

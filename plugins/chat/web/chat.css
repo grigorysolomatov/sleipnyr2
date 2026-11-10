@@ -168,8 +168,6 @@ body:has(.c-shell:not(.thread-open) .c-strip:not([hidden])) { --bar-line: var(--
 .c-text ul { margin: .45em 0; list-style: none; padding-left: 1rem; }
 .c-text li { position: relative; margin: 0 0 .5rem; }
 .c-text ul > li::before { content: ""; position: absolute; left: -.75rem; top: .6em; width: 5px; height: 5px; background: var(--text); border-radius: 1px; }
-.c-li-h { color: var(--text); }
-.c-li-d { color: var(--text-muted); font-size: .92em; line-height: 1.45; margin-top: 1px; }
 
 .c-img { display: block; max-width: min(100%, 22rem); max-height: 18rem; border-radius: var(--radius); border: 1px solid var(--line); margin-bottom: .4rem; }
 /* a non-image file: symbol, name, size; tap opens / downloads it */
