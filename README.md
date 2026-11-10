@@ -172,12 +172,20 @@ The `settings` plugin (formerly `theme`; the old name, `/p/theme` and
   messages and links, and each uploaded file that nothing else refers to.
 
 Features and Data are one kernel-owned item (type `settings`):
-`GET /k/settings` -> `{allowDelete, features, pickerHidden}`, `PATCH /k/settings` with
+`GET /k/settings` -> `{allowDelete, features, pickerHidden, viewNotes}`, `PATCH /k/settings` with
 `{"allowDelete": true}` or `{"features": {"recent": false}}` (null = back to
 the config default). `pickerHidden` is a list of modality ids left out of the
 picker (they stay reachable by address); unknown ids are refused with 400, null
 = back to the config's `app.pickerHidden`. Settings > Picker has one switch per
 modality. Pages follow a change live.
+`viewNotes` are hidden agent notes per view type (`{"blackboards": "text"}`),
+shown at the top of every prompt from any instance of that view (all
+blackboards); the config's `app.viewNotes` are the defaults, `""` clears one,
+null = back to the default (4000 characters each). Blackboards edits them in
+its memo popover ("All blackboards") and by `@memo-all <text>` /
+`@memo-all-clear`; the per-board notes stay in the board item (`@memo`).
+Each blackboard has its own embedded conversation (`chatView`, else
+`blackboards-<id>`); the board list has its own (`blackboards-boards`).
 
 ### Theme
 

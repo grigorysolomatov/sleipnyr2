@@ -19,7 +19,7 @@ const BUILD = basename(realpathSync(ROOT));
 export interface Config {
   listen: { host: string; port: number };
   dataDir: string;
-  app: { name: string; shortName: string; home: string; agentName?: string; features?: Record<string, boolean>; pickerHidden?: string[] }; // home = plugin shown at "/"; agentName = how the UI names the agent
+  app: { name: string; shortName: string; home: string; agentName?: string; features?: Record<string, boolean>; pickerHidden?: string[]; viewNotes?: Record<string, string> }; // home = plugin shown at "/"; agentName = how the UI names the agent
   user: { id: string; name: string };
   plugins: Record<string, Record<string, unknown>>; // enabled plugins and their settings
   actions?: ActionsConfig; // which agents may call the plugins' declared actions (kernel/actions.ts)
@@ -168,6 +168,7 @@ export async function createApp(config: Config) {
   store.onRemove = item => events.publish(ITEM_TOPIC, { item, removed: true });
 
   // ---- app settings: one kernel-owned item, changed by hand in Settings
+  const VIEW_NOTES_MAX = 4000;
   const kItems = store.items("kernel");
   const settingsItem = () => kItems.list<Partial<AppSettings>>({ type: SETTINGS_TYPE, order: "-updated", limit: 1 })[0] || null;
   const settings = (): AppSettings => {
@@ -176,9 +177,11 @@ export async function createApp(config: Config) {
     for (const [k, v] of Object.entries(config.app.features || {})) features[k] = v !== false;
     for (const [k, v] of Object.entries(d.features || {})) if (typeof v === "boolean") features[k] = v;
     const pickerHidden = Array.isArray(d.pickerHidden) ? d.pickerHidden : config.app.pickerHidden || [];
-    return { allowDelete: d.allowDelete === true, features, pickerHidden };
+    const viewNotes: Record<string, string> = {};
+    for (const [k, v] of Object.entries({ ...(config.app.viewNotes || {}), ...(d.viewNotes || {}) })) if (typeof v === "string" && v) viewNotes[k] = v;
+    return { allowDelete: d.allowDelete === true, features, pickerHidden, viewNotes };
   };
-  const setSettings = (b: { allowDelete?: unknown; features?: unknown; pickerHidden?: unknown }): AppSettings => {
+  const setSettings = (b: { allowDelete?: unknown; features?: unknown; pickerHidden?: unknown; viewNotes?: unknown }): AppSettings => {
     const patch: Record<string, unknown> = {};
     if (b.allowDelete !== undefined) {
       if (typeof b.allowDelete !== "boolean") throw Object.assign(new Error("allowDelete must be true or false"), { status: 400 });
@@ -201,7 +204,18 @@ export async function createApp(config: Config) {
         throw Object.assign(new Error("pickerHidden must be a list of modality ids"), { status: 400 });
       else patch.pickerHidden = [...new Set(v as string[])];
     }
-    if (!Object.keys(patch).length) throw Object.assign(new Error("allowDelete, features or pickerHidden required"), { status: 400 });
+    if (b.viewNotes !== undefined) {
+      // {view: text} replaces that view's notes ("" = none), null = back to the config default
+      if (!b.viewNotes || typeof b.viewNotes !== "object" || Array.isArray(b.viewNotes)) throw Object.assign(new Error("viewNotes must be {view: text|null}"), { status: 400 });
+      const n: Record<string, string | null> = { ...(settingsItem()?.data.viewNotes || {}) };
+      for (const [k, v] of Object.entries(b.viewNotes as Record<string, unknown>)) {
+        if (!/^[a-z][a-z0-9-]{0,40}$/.test(k) || (typeof v !== "string" && v !== null)) throw Object.assign(new Error(`bad view notes ${k}`), { status: 400 });
+        if (typeof v === "string" && v.length > VIEW_NOTES_MAX) throw Object.assign(new Error(`notes for ${k} longer than ${VIEW_NOTES_MAX} characters`), { status: 400 });
+        if (v === null) delete n[k]; else n[k] = v;
+      }
+      patch.viewNotes = n;
+    }
+    if (!Object.keys(patch).length) throw Object.assign(new Error("allowDelete, features, pickerHidden or viewNotes required"), { status: 400 });
     const cur = settingsItem();
     if (cur) kItems.update(cur.id, patch); else kItems.create(SETTINGS_TYPE, { allowDelete: false, features: {}, ...patch });
     return settings();

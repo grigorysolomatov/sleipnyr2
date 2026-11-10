@@ -274,7 +274,7 @@ async function boot() {
     // feature switches: Settings > Features (kernel settings item) over the app config; default on
     feature: name => (info.settings?.features?.[name] ?? info.app.features?.[name]) !== false,
     // the app settings changed by hand in Settings: {allowDelete, features}; kept fresh live
-    settings: () => info.settings || { allowDelete: false, features: {}, pickerHidden: null },
+    settings: () => info.settings || { allowDelete: false, features: {}, pickerHidden: null, viewNotes: {} },
     fileUrl: id => `/k/files/${encodeURIComponent(id)}`,
     address: id => `/i/${encodeURIComponent(id)}`,
     go: id => history.pushState({}, "", `/i/${encodeURIComponent(id)}`),
@@ -286,6 +286,8 @@ async function boot() {
     api("/k/settings").then(s => { info.settings = s; settingsHooks.forEach(f => { try { f(s); } catch (e) { console.error(e); } }); }).catch(() => {});
   });
   ctx.onSettings = fn => { settingsHooks.add(fn); return () => settingsHooks.delete(fn); };
+  // a page that just saved settings has the merged values already (the live event follows)
+  ctx.settingsChanged = s => { info.settings = s; settingsHooks.forEach(f => { try { f(s); } catch (e) { console.error(e); } }); };
   const restyleOn = new Map(info.plugins.flatMap(p => (p.web?.restyleOn || []).map(t => [t, p.id])));
   if (restyleOn.size) on("item", ({ item }) => { const p = restyleOn.get(item?.type); if (p) restyle(p); });
   ctx.bar = createBar(ctx, root);

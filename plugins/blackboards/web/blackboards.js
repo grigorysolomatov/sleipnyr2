@@ -16,7 +16,7 @@
 //
 // Saved item (kernel /k/items; the type stays "session", the modality's old
 // name, so every existing board keeps working):
-//   session {title, hidden?, view: {x, y, z}, highlight?: {id, reason}, windows: [{id, kind, ref, title, named?, text?, x, y, w, h, collapsed, z}]}
+//   session {title, hidden?, chatView?, agentNotes?, view: {x, y, z}, highlight?: {id, reason}, windows: [{id, kind, ref, title, named?, text?, x, y, w, h, collapsed, z}]}
 //     kind  thread (ref = thread id) | threads | tinder | projects (ref = project id or "")
 //           | file (ref = file id) | url (ref = http(s) URL) | note (text = Markdown, kept in the session)
 //     named  the title was set by hand or by @title (a thread window then keeps it)
@@ -32,19 +32,25 @@
 // "Unsorted" below all zones; a hand-added one to the free slot nearest the
 // middle of the screen. The zone grows to hold it. A @move onto another
 // window is nudged to the nearest free slot in the same zone.
-// Own place: the open board (ctx.levels.go("blackboards", id)). Its
-// conversation sits in the embedded chat (ctx.embed), the bar talks to it, and
-// replies may carry "@name args" lines (see describe()).
+// Own place: the open board (ctx.levels.go("blackboards", id)). Each board has
+// its own conversation (view thread session.chatView, else blackboards-<id>,
+// made on first open; boards from before this were given chatView "sessions",
+// the old shared thread, so their history stays with them) and the board list has its own (blackboards-boards).
+// It sits in the embedded chat (ctx.embed), the bar talks to it, and replies
+// may carry "@name args" lines (see describe()).
+// Hidden agent notes come in two layers, both first in every prompt: notes for
+// all blackboards (kernel settings viewNotes.blackboards, @memo-all) and notes
+// for this blackboard (session.agentNotes, @memo; windows[].agentNotes too).
 import { render } from "/web/text.js";
 import { darkFrame } from "/web/frame.js";
-import { ONE_SENTENCE, runs } from "/web/hcp.js";
+import { CHAT_FIRST, runs, viewNotes, setViewNotes, notesBlock } from "/web/hcp.js";
 import { backButton } from "/web/head.js";
 import * as P from "./place.js";
 
 const ME = "blackboards";
-// the board's conversation (view history thread) keeps the old view name, so
-// its history and any reply still waiting to run carry over the rename
-const VIEW = "sessions";
+// the board list's conversation; each board's own is chatOf(board)
+const LIST_VIEW = `${ME}-boards`;
+const chatOf = it => it.data.chatView || `${ME}-${String(it.id).replace(/[^a-z0-9]/g, "").slice(-18)}`; // view names stay within 31 characters
 // What a board is called on screen, in one place (it may become "canvas").
 const WORD = "blackboard", WORDS = "blackboards";
 const Cap = w => w[0].toUpperCase() + w.slice(1);
@@ -237,7 +243,9 @@ export function mount(box, ctx) {
 
   async function newSession(title) {
     try {
-      const it = await ctx.api("/k/items", { json: { type: "session", data: { title: title || `${Cap(WORD)} ${new Date().toLocaleDateString()}`, windows: [], view: { x: 0, y: 0, z: 1 } } } });
+      const it0 = await ctx.api("/k/items", { json: { type: "session", data: { title: title || `${Cap(WORD)} ${new Date().toLocaleDateString()}`, windows: [], view: { x: 0, y: 0, z: 1 } } } });
+      // its own conversation, named in the item (the same name chatOf() gives a board without one)
+      const it = await ctx.api(`/k/items/${encodeURIComponent(it0.id)}`, { method: "PATCH", json: { chatView: chatOf(it0) } }).catch(() => it0);
       st.list.unshift(it);
       ctx.levels.go(ME, it.id);
       return it;
@@ -923,23 +931,32 @@ export function mount(box, ctx) {
   // Hidden Markdown kept in the session (session.agentNotes, windows[].agentNotes):
   // conventions agreed on this board. describe() puts them first in every prompt.
   const NOTE_MAX = 4000;
+  // notes for all blackboards live in the kernel settings: saved a moment after typing stops
+  let allTimer = 0, allText = null;
+  const saveAll = () => { clearTimeout(allTimer); const t = allText; allText = null;
+    return t === null ? Promise.resolve() : setViewNotes(ctx, ME, t).then(() => say("")).catch(e => say(`Notes not saved: ${e.message}`, true)); };
   function drawMemo() {
-    const field = (label, get, set, tip) => {
+    const field = (label, get, set, tip, after = save) => {
       const ta = h("textarea", { class: "ss-memota", rows: 3, spellcheck: "true", "aria-label": label, "data-tip": tip });
       ta.value = get() || "";
-      ta.addEventListener("input", () => { set(ta.value.slice(0, NOTE_MAX)); save(); });
+      ta.addEventListener("input", () => { set(ta.value.slice(0, NOTE_MAX)); after(); });
       return h("label", { class: "ss-memof" }, h("span", {}, label), ta);
     };
+    const all = field(`All ${WORDS}`, () => (allText ?? viewNotes(ctx, ME)), v => { allText = v; },
+      `Read on every ${WORD} and in the ${WORD} list`, () => { clearTimeout(allTimer); allTimer = setTimeout(saveAll, 600); });
     memo.replaceChildren(
-      h("p", { class: "ss-memoh" }, `Agent notes: ${AG} reads these at the top of every prompt for this board. Not shown anywhere else.`),
-      field("Whole board", () => sess().agentNotes, v => { sess().agentNotes = v; }, "Conventions for the whole board"),
-      ...wins().map(w => field(`${w.id} · ${winTitle(w)}`, () => w.agentNotes, v => { if (v.trim()) w.agentNotes = v; else delete w.agentNotes; }, "Notes about this window")));
+      h("p", { class: "ss-memoh" }, `Agent notes: ${AG} reads these at the top of every prompt. Not shown anywhere else.`),
+      all,
+      ...(st.open ? [
+        field(`This ${WORD}`, () => sess().agentNotes, v => { sess().agentNotes = v; }, `Conventions for this ${WORD} only`),
+        ...wins().map(w => field(`${w.id} · ${winTitle(w)}`, () => w.agentNotes, v => { if (v.trim()) w.agentNotes = v; else delete w.agentNotes; }, "Notes about this window"))] : []));
   }
+  ctx.onSettings?.(() => { if (!memo.hidden && allText === null) drawMemo(); });
   function toggleMemo(on = memo.hidden) {
-    if (on && !st.open) on = false;
+    if (!on) saveAll();
     memo.hidden = !on; memoBtn.classList.toggle("on", on);
     if (on) { pick.hidden = true; drawMemo(); const b = memoBtn.getBoundingClientRect(), r = box.getBoundingClientRect();
-      memo.style.top = (b.bottom - r.top + 4) + "px"; memo.style.right = Math.max(4, r.right - b.right) + "px"; }
+      memo.style.top = (b.bottom - r.top + 4) + "px"; memo.style.right = Math.max(4, Math.min(r.right - b.right, r.width - memo.offsetWidth - 4)) + "px"; } // under the button, never past the left edge
   }
   addEventListener("pointerdown", e => { if (!memo.hidden && !memo.contains(e.target) && !memoBtn.contains(e.target)) toggleMemo(false); }, true);
   addEventListener("keydown", e => { if (e.key === "Escape" && !memo.hidden) toggleMemo(false); });
@@ -955,6 +972,15 @@ export function mount(box, ctx) {
     target.agentNotes = next; if (!memo.hidden) drawMemo();
     return m ? `memo ${m[1]}` : "memo";
   }
+  // @memo-all <text> | @memo-all-clear: the notes for every blackboard (appends, never replaces)
+  async function memoAll(add) {
+    add = add.trim(); if (!add) throw new Error("usage: @memo-all <text>");
+    const cur = viewNotes(ctx, ME), next = (cur ? cur.replace(/\s+$/, "") + "\n" : "") + add;
+    if (next.length > NOTE_MAX) throw new Error(`notes full (${NOTE_MAX} characters): @memo-all-clear first, then write them again shorter`);
+    await setViewNotes(ctx, ME, next); if (!memo.hidden) drawMemo();
+    return "memo-all";
+  }
+  async function memoAllClear() { await setViewNotes(ctx, ME, ""); if (!memo.hidden) drawMemo(); return "memo-all-clear"; }
   function memoClear(id) {
     if (id) { const w = find(id); if (!w) throw new Error(`no window ${id}`); delete w.agentNotes; }
     else delete sess().agentNotes;
@@ -968,24 +994,25 @@ export function mount(box, ctx) {
   const describe = async () => {
     await loadThreads();
     const threads = st.threads.slice(0, 25).map(t => `- ${t.id} | ${t.data.title || ""}`).join("\n");
-    const commonOpen = `This chat is the ${Cap(WORDS)} view's own history; the view acts on your reply. `
-      + `${ONE_SENTENCE}, then one line per action. `
-      + `${runs("view")} Never delete anything.\n`;
+    const memoAllLines = `@memo-all <text>   (append to the hidden notes for ALL ${WORDS}, shown to you at the top of every ${Cap(WORDS)} prompt: for general preferences ${WHO} states)\n@memo-all-clear\n`;
+    const commonOpen = `${CHAT_FIRST}. ${runs("view")} Never delete anything.\n`;
     const common = commonOpen.trimEnd() + "]";
+    const allNotes = [`Notes for all ${WORDS}`, viewNotes(ctx, ME)];
     if (!st.open) {
       await loadList();
-      return `[Sent from the Sleipnyr ${Cap(WORDS)} modality: a list of ${WORDS} (overview boards with windows into threads, `
+      return `${notesBlock(WHO, [allNotes])}[Sent from the Sleipnyr ${Cap(WORDS)} modality: a list of ${WORDS} (overview boards with windows into threads, `
         + `projects, files and other views). On screen (id | title | windows):\n${st.list.filter(s => !s.data.hidden).map(s => `- ${s.id} | ${s.data.title} | ${summary(s)}`).join("\n") || "(none)"}\n`
         + `Archived: \n${st.list.filter(s => s.data.hidden).map(s => `- ${s.id} | ${s.data.title}`).join("\n") || "(none)"}\n`
-        + `Actions, exactly:\n@open <${WORD} id>\n@new <title>   (makes and opens a ${WORD})\n@rename <${WORD} id> <title>\n@hide <${WORD} id>   (archive)\n@unhide <${WORD} id>\n` + common;
+        + `Actions, exactly:\n@open <${WORD} id>\n@new <title>   (makes and opens a ${WORD})\n@rename <${WORD} id> <title>\n@hide <${WORD} id>   (archive)\n@unhide <${WORD} id>\n` + memoAllLines
+        + `This chat is the ${WORD} list's own conversation (each ${WORD} has its own). ` + common;
     }
     const v = viewOf(), r = board.getBoundingClientRect();
     const hl = sess().highlight?.id;
     const ws = wins().map(w => `- ${w.id} | ${w.kind}${w.ref ? " " + w.ref : ""} | ${winTitle(w)} | x ${w.x} y ${w.y} w ${w.w} h ${w.h}${w.collapsed ? " | folded" : ""}${w.id === hl ? " | highlighted" : ""}${w.fresh ? " | marked new" : ""}`
       + (w.kind === "note" ? `\n  text:\n${clip(w.text || "(empty)", 600).replace(/^/gm, "    ")}` : "")).join("\n");
-    const notes = [sess().agentNotes ? `Notes for this ${WORD} (${WHO}'s agreed conventions; follow them):\n${sess().agentNotes}` : "",
-      ...wins().filter(w => w.agentNotes).map(w => `Notes for window ${w.id}:\n${w.agentNotes}`)].filter(Boolean).join("\n\n");
-    return `${notes ? `[Agent notes, hidden from ${WHO}'s board view, kept with the ${WORD}]\n${notes}\n[End of agent notes]\n\n` : ""}[Sent from the Sleipnyr ${Cap(WORDS)} modality: ${WORD} ${st.open.id} "${sess().title}", an infinite board ${WHO} pans and zooms (phone and desktop alike). `
+    const notes = notesBlock(WHO, [allNotes, [`Notes for this ${WORD}`, sess().agentNotes],
+      ...wins().map(w => [`Notes for window ${w.id}`, w.agentNotes])]);
+    return `${notes}[Sent from the Sleipnyr ${Cap(WORDS)} modality: ${WORD} ${st.open.id} "${sess().title}", an infinite board ${WHO} pans and zooms (phone and desktop alike). `
       + `Actions, exactly:\n@add thread <thread id>\n@add threads   (the thread list)\n@add tinder\n@add projects [project id]\n@add file <file id> [| title]\n@add url <https address>\n`
       + `Placement: a new window never covers another. End @add or @note with " in <zone title>" (an existing zone) to put it in that zone's next free slot (the zone grows); without it, it lands in an "Unsorted" zone below all zones (when the ${WORD} has zones). A later @move still places it exactly.\n`
       + `@move <window id> <x> <y> [<w> <h>]   (snaps to a 24 px grid; onto another window it is nudged to the nearest free slot in the same zone)\n@arrange [zone title]   (tidy grid, no overlap; with zones each zone on its own, or just the named one)\n`
@@ -995,8 +1022,9 @@ export function mount(box, ctx) {
       + `@note <title>   (a new note window; its Markdown text follows on the next lines, then a line @end; keep it to one screen)\n`
       + `@edit <window id>   (replace a note's text: the new text on the next lines, then @end)\n`
       + `@title <window id> <name>   (rename a window)\n@highlight <window id> [why]   (pink "look here" frame, one at a time; a tap clears it)\n@unhighlight\n@new <window id> [why]   (green "new" frame, any number of windows; a tap/unfold clears it)\n@unnew <window id>\n`
-      + `@memo <text>   (append to the hidden notes for this ${WORD}, shown to you at the top of every prompt: use for conventions ${WHO} agrees)\n@memo <window id> <text>   (append to that window's hidden notes)\n@memo-clear [window id]   (erase the ${WORD}'s notes, or that window's)\n`
-      + `In notes, link files as [name](/k/files/<file id>) and pages as [name](https://...).\n` + commonOpen
+      + `@memo <text>   (append to the hidden notes for this ${WORD}, shown to you at the top of every prompt: use for conventions ${WHO} agrees)\n@memo <window id> <text>   (append to that window's hidden notes)\n@memo-clear [window id]   (erase the ${WORD}'s notes, or that window's)\n` + memoAllLines
+      + `In notes, link files as [name](/k/files/<file id>) and pages as [name](https://...).\n`
+      + `This chat is this ${WORD}'s own conversation (other ${WORDS} have their own). ` + commonOpen
       + `Windows on it (id | kind ref | title | position and size in board px):\n${ws || "(none)"}\n`
       + `Zones (title | x y w h | windows | next free slot for a note):\n${zones().map(z => { const p = P.slotIn(z, wins(), KINDS.note, zones());
         return `- ${z.title} | ${z.x} ${z.y} ${z.w} ${z.h} | ${wins().filter(w => zoneOf(w) === z).map(w => w.id).join(" ") || "-"} | x ${p.x} y ${p.y}`; }).join("\n") || "(none)"}\n`
@@ -1011,6 +1039,8 @@ export function mount(box, ctx) {
   };
   const run1 = async (name, args, text = "") => {
     const a = String(args || "").trim(), [first, ...rest] = a.split(/\s+/);
+    if (name === "memo-all") return memoAll(a + (text ? "\n" + text : ""));
+    if (name === "memo-all-clear") return memoAllClear();
     if (!st.open) {
       if (name === "open") { if (!st.list.some(s => s.id === first)) throw new Error(`no such ${WORD}`); ctx.levels.go(ME, first); return `open ${first}`; }
       if (name === "new") { const it = await newSession(a); return `new ${it?.id}`; }
@@ -1063,6 +1093,8 @@ export function mount(box, ctx) {
     placeholder: () => (st.open ? `Ask the ${WORD}: add, move or fold windows, write notes` : `Ask ${Cap(WORDS)}: open or start a ${WORD}`),
     send: b => { if (!chat) throw new Error("no conversation here"); return chat.send(b); } });
 
+  // the embedded chat: this board's own conversation (or the list's)
+  const embed = (view, title) => { chat = ctx.embed(view, box, { title, from: "blackboards", describe, run, scope: () => st.open?.id || "", ownThread: true }); };
   // never waits on the network before drawing what it can (a stalled phone
   // connection must not leave the old view up while the URL changed)
   let showing = 0;
@@ -1071,6 +1103,7 @@ export function mount(box, ctx) {
     pick.hidden = true; say("");
     if (!sub) {
       st.open = null; st.here = "";
+      embed(LIST_VIEW, `${Cap(WORD)} list conversation`);
       if (!st.list.length) { await loadList(); if (mine !== showing) return; }
       drawList(); chat?.retry?.(); return;
     }
@@ -1082,6 +1115,7 @@ export function mount(box, ctx) {
     if (st.open?.id !== it.id) { st.els.forEach(e => e.el.remove()); st.els.clear(); }
     st.open = { ...it, data: { windows: [], view: { x: 0, y: 0, z: 1 }, ...it.data } }; st.last = it.id; setBase(it);
     drawBoard(); firstView();
+    embed(chatOf(it), `${it.data.title || Cap(WORD)} conversation`);
     // thread titles for thread windows arrive behind the drawn board
     loadThreads().then(() => { if (mine === showing && st.open?.id === it.id) drawBoard(); }).catch(() => {});
     chat?.retry?.(); // replies that arrived while this session was not on screen
@@ -1109,8 +1143,6 @@ export function mount(box, ctx) {
   ctx.levels.onChange((level, sub) => {
     if (level !== ME) return;
     show(sub || "");
-    chat = ctx.embed(VIEW, box, { title: `${Cap(WORDS)} conversation`,
-      from: "blackboards", describe, run, scope: () => st.open?.id || "" });
     ctx.bar.focus(hereWin() ? WIN : ME);
   });
   ctx.on("item", ({ item }) => {

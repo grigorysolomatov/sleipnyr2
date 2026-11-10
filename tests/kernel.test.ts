@@ -116,6 +116,17 @@ test("settings: kernel item, deletion off by default, features over the config",
   expect(Array.isArray((await call("GET", "/k/settings")).body.pickerHidden)).toBe(true);
 });
 
+test("settings: hidden agent notes per view type", async () => {
+  expect((await call("GET", "/k/settings")).body.viewNotes).toEqual({});
+  expect((await call("PATCH", "/k/settings", { viewNotes: "x" })).status).toBe(400);
+  expect((await call("PATCH", "/k/settings", { viewNotes: { "Bad View": "x" } })).status).toBe(400);
+  expect((await call("PATCH", "/k/settings", { viewNotes: { blackboards: "x".repeat(4001) } })).status).toBe(400);
+  expect((await call("PATCH", "/k/settings", { viewNotes: { blackboards: "Answer in the chat." } })).body.viewNotes).toEqual({ blackboards: "Answer in the chat." });
+  expect((await call("GET", "/k/plugins")).body.settings.viewNotes.blackboards).toBe("Answer in the chat.");
+  expect((await call("PATCH", "/k/settings", { viewNotes: { blackboards: "" } })).body.viewNotes.blackboards).toBeUndefined();
+  expect((await call("PATCH", "/k/settings", { viewNotes: { blackboards: null } })).body.viewNotes).toEqual({});
+});
+
 test("the old theme address still works", async () => {
   expect((await app.fetch(new Request("http://x/p/theme/theme.css"))).status).toBe(200);
   expect((await call("GET", "/p/theme/tokens")).status).toBe(200);

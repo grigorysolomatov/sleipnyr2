@@ -243,8 +243,11 @@ export interface Kernel {
  *  features: on/off per switch, over the config's app.features (default on).
  *  allowDelete: deleting archived things for good (default off).
  *  pickerHidden: modality ids left out of the picker (the config's app.pickerHidden
- *  until Settings sets it). */
-export interface AppSettings { allowDelete: boolean; features: Record<string, boolean>; pickerHidden: string[] }
+ *  until Settings sets it).
+ *  viewNotes: hidden agent notes per view type (plugin id -> text), shown at the top of
+ *  every prompt from any instance of that view (all blackboards, all boards); the
+ *  config's app.viewNotes are the defaults, a Settings value (even "") replaces one. */
+export interface AppSettings { allowDelete: boolean; features: Record<string, boolean>; pickerHidden: string[]; viewNotes: Record<string, string> }
 export const SETTINGS_TYPE = "settings";
 
 export type Handler = (req: Request, params: Record<string, string>) => Response | Promise<Response>;
