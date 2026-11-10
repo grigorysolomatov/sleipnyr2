@@ -153,7 +153,8 @@ function sse(events: Events, topics: string[], req: Request): Response {
       };
       const close = () => { offs.forEach(f => f()); offs = []; clearInterval(ping); };
       offs = topics.map(t => events.subscribe(t, d => send(t, d)));
-      ping = setInterval(() => { try { ctl.enqueue(enc.encode(": ping\n\n")); } catch { close(); } }, 20000);
+      // a named event the page can see: no ping for a while = a dead stream it reopens
+      ping = setInterval(() => { try { ctl.enqueue(enc.encode("event: ping\ndata: 1\n\n")); } catch { close(); } }, 20000);
       ctl.enqueue(enc.encode("retry: 2000\n: open\n\n"));
       req.signal.addEventListener("abort", () => { close(); try { ctl.close(); } catch {} });
     },

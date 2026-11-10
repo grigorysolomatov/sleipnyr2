@@ -541,7 +541,8 @@ export async function mount(root, ctx) {
   }
 
   // ------------------------------------------------------------ live updates
-  ctx.on("item", ({ item }) => {
+  ctx.on("item", ({ item }) => onItem(item));
+  function onItem(item) {
     if (item.type === "thread") {
       if (item.data.view) { if (item.data.view === emb.view) { st.viewThread = item; if (st.hist?.id === item.id) { st.hist = item; setStripName(); } else if (!isAlt()) pinHist(item); } } // never listed
       else {
@@ -566,7 +567,27 @@ export async function mount(root, ctx) {
       if (["done", "error", "stopped", "cancelled"].includes(item.data.status)) { st.live.delete(item.id); st.steps.delete(item.id); }
       redrawMessage(item.id);
     }
-  });
+  }
+  // Watchdog: a reply shown as waiting/working is re-read from the server every
+  // 15 s (and when the page comes back), so a missed event never leaves a
+  // spinner running after the server finished (thread and embedded strip).
+  async function recheck() {
+    if (document.visibilityState !== "visible") return;
+    const busy = m => m && m.data && (m.data.role === "agent" ? ["queued", "working"].includes(m.data.status) : m.data.status === "transcribing");
+    const ids = new Map();
+    for (const m of st.msgs.values()) if (busy(m)) ids.set(m.id, m);
+    for (const m of st.histMsgs.values()) if (busy(m)) ids.set(m.id, m);
+    const last = st.histLast?.reply;
+    if (busy(last) && last.id) ids.set(last.id, last);
+    for (const [id, m] of ids) {
+      try {
+        const item = await ctx.api(`/k/items/${encodeURIComponent(id)}`);
+        if (item?.data && item.data.status !== m.data.status) onItem(item);
+      } catch (e) { console.error(e); }
+    }
+  }
+  setInterval(recheck, 15000);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") recheck(); });
   ctx.on("chat", ev => {
     if (st.hist && ev.thread === st.hist.id && ev.progress !== undefined) {
       st.histLive.set(ev.message, { progress: ev.progress });

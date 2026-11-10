@@ -73,13 +73,16 @@ const upload = file => api(`/k/files?name=${encodeURIComponent(file.name || "fil
 // one EventSource for all topics; reopened with the new topic list when it grows
 const handlers = new Map(), reconnects = new Set();
 const settingsHooks = new Set();
-let source = null, opened = false;
+let source = null, opened = false, heard = 0;
 function connect() {
   if (source) source.close();
+  heard = Date.now();
   const qs = [...handlers.keys()].map(t => "topic=" + encodeURIComponent(t)).join("&");
   source = new EventSource("/k/events?" + qs);
-  source.onopen = () => { if (opened) reconnects.forEach(f => f()); opened = true; };
+  source.onopen = () => { heard = Date.now(); if (opened) reconnects.forEach(f => f()); opened = true; };
+  source.addEventListener("ping", () => { heard = Date.now(); });
   source.onmessage = e => {
+    heard = Date.now();
     let m; try { m = JSON.parse(e.data); } catch { return; }
     (handlers.get(m.topic) || []).forEach(fn => { try { fn(m.data); } catch (err) { console.error(err); } });
   };
@@ -104,10 +107,15 @@ const onReconnect = fn => {
   if (!parentShell) { reconnects.add(fn); return; }
   frameOffs.add(parentShell.__kOnReconnect(fn));
 };
-// a phone wakes the page up with a dead connection: reopen and let plugins catch up
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && source && source.readyState === EventSource.CLOSED) { opened = true; connect(); }
-});
+// A phone wakes the page up with a dead connection that may still claim to be
+// open: reopen and let plugins catch up. The server pings every 20 s, so a
+// stream silent for 45 s (or 25 s when the page comes back) is dead.
+const revive = () => { if (source) { opened = true; connect(); } };
+const stale = ms => !source || source.readyState === EventSource.CLOSED || Date.now() - heard > ms;
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && stale(25000)) revive(); });
+addEventListener("online", revive);
+addEventListener("pageshow", e => { if (e.persisted) revive(); });
+setInterval(() => { if (document.visibilityState === "visible" && source && stale(45000)) revive(); }, 5000);
 
 const loadCss = href => new Promise(ok => {
   const l = document.createElement("link");
