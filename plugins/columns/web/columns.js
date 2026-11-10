@@ -3,7 +3,10 @@
 // into another view: a thread, the thread list, Task Tinder, Projects, a
 // file, a web page). A phone shows one column at a time: swipe sideways (or
 // tap the arrows) to change column. A wide screen shows as many side by side
-// as fit. A tap on a panel's title bar folds or unfolds it; hold the title
+// as fit. The rows button in the header opens the column list: the board's
+// columns as rows like the thread list (pink = the column on screen); a tap
+// lands on that column, hold (or mouse-drag) a row to reorder the columns,
+// back / Esc / browser back return to the board where it was. A tap on a panel's title bar folds or unfolds it; hold the title
 // bar and drag to move the panel up or down its column.
 // A window into a view is that view's own page in a frame (?frame=1, see
 // shell.js); the shared bar talks to the focused one (the "→ target" label
@@ -53,6 +56,8 @@ const CHECK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 
 const BOX = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M10 12h4"/></svg>';
 const UNBOX = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M12 18v-6M9.5 14.5L12 12l2.5 2.5"/></svg>';
 const SEND = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg>';
+// the column list: stacked rows (distinct from the threads menu's dotted list)
+const ROWS = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="4" rx="1"/><rect x="4" y="10" width="16" height="4" rx="1"/><rect x="4" y="16" width="16" height="4" rx="1"/></svg>';
 const SAY = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H10l-5 4v-4H4z"/></svg>';
 
 const KINDS = {
@@ -112,20 +117,25 @@ export function mergeList(base, local, server) {
 
 export function mount(box, ctx) {
   const WHO = ctx.user?.name || "the user", AG = ctx.app?.agentName || "the agent";
-  const st = { item: null, list: [], last: "", base: null, baseAt: 0, saveTimer: 0, here: "", threads: [], els: new Map(), cels: new Map(), at: "", showDis: false };
+  const st = { item: null, list: [], last: "", base: null, baseAt: 0, saveTimer: 0, here: "", threads: [], els: new Map(), cels: new Map(), at: "", showDis: false, listOpen: false, noClick: 0 };
   box.classList.add("co-level");
-  const back = backButton({ cls: "co-back", onclick: () => (st.item ? ctx.levels.go(ME, "") : ctx.levels.up()) });
+  const back = backButton({ cls: "co-back", onclick: () => (st.listOpen ? closeList() : st.item ? ctx.levels.go(ME, "") : ctx.levels.up()) });
   const titleEl = h("b", { class: "co-title" }, "Columns");
   const pos = h("span", { class: "co-pos", "aria-live": "polite" });
   const addBtn = icon(PLUS, "Add a column or a panel", () => (st.item ? togglePick() : newBoard()), "co-add");
-  const head = h("header", { class: "co-bar" }, back, titleEl, pos, addBtn);
-  const strip = h("div", { class: "co-cols", "aria-label": "Columns", hidden: true });
+  const listBtn = icon(ROWS, "Column list: pick or reorder columns", () => openList(), "co-listb");
+  const head = h("header", { class: "co-bar" }, back, titleEl, pos, listBtn, addBtn);
+  const strip = h("div", { class: "co-cols", "aria-label": "Columns", hidden: true,
+    "data-k-id": "mode", "data-k-kind": "mode", "data-k-label": "Board: the columns side by side (swipe sideways)" });
+  // the column list (the rows button): one row per column, the thread list's look
+  const clist = h("ul", { class: "k-items co-clist", role: "list", "aria-label": "Column list", hidden: true,
+    "data-k-id": "mode", "data-k-kind": "mode", "data-k-label": "Column list: the columns as rows (a tap opens that column, hold and drag reorders)" });
   const boards = itemList({ word: "board", agent: AG, href: it => `/m/${ME}/${encodeURIComponent(it.id)}`, open: it => ctx.levels.go(ME, it.id),
     title: it => it.data.title || "Untitled board", summary: it => boardSummary(it) });
   const note = h("p", { class: "co-note", "aria-live": "polite", hidden: true });
   const pick = h("div", { class: "co-pick k-pop", hidden: true, role: "menu" });
   const fileIn = h("input", { type: "file", hidden: true, onchange: () => addFile() });
-  box.append(head, boards.el, strip, note, pick, fileIn);
+  box.append(head, boards.el, strip, clist, note, pick, fileIn);
   const say = (t, err = false) => { note.hidden = !t; note.textContent = t || ""; note.classList.toggle("err", err); };
 
   // ------------------------------------------------------------ data
@@ -193,7 +203,7 @@ export function mount(box, ctx) {
   function takeRemote(it) { const was = rects(); rebase(it); draw(); glideFrom(was); }
   // never redraw under a finger: a copy arriving mid-drag waits until it ends
   function remote(it) {
-    if (!drag) return takeRemote(it);
+    if (!drag && !rowDrag) return takeRemote(it);
     if (!st.later || it.updated > st.later.updated) st.later = it;
   }
   // ------------------------------------------------------------ the boards
@@ -234,12 +244,12 @@ export function mount(box, ctx) {
     titleEl.classList.toggle("co-ren", !!it);
     if (it) titleEl.dataset.tip = "Tap to rename"; else delete titleEl.dataset.tip;
     titleEl.onclick = it ? () => renameBoard() : null;
-    const bt = it ? "All boards" : "All modalities", at = it ? "Add a column or a panel" : "New board";
+    const bt = st.listOpen ? "Back to the board" : it ? "All boards" : "All modalities", at = it ? "Add a column or a panel" : "New board";
     back.dataset.tip = bt; back.setAttribute("aria-label", bt);
     addBtn.dataset.tip = at; addBtn.setAttribute("aria-label", at);
-    pos.hidden = !it;
+    pos.hidden = !it || st.listOpen; listBtn.hidden = !it || st.listOpen; addBtn.hidden = st.listOpen;
   }
-  function drawList() { drawHead(); strip.hidden = true; boards.el.hidden = false; boards.draw(st.list, st.last); }
+  function drawList() { drawHead(); strip.hidden = true; clist.hidden = true; boards.el.hidden = false; boards.draw(st.list, st.last); }
 
   // ------------------------------------------------------------ drawing
   function draw() {
@@ -264,6 +274,7 @@ export function mount(box, ctx) {
     if (!cols().length) strip.replaceChildren(h("p", { class: "co-empty" }, "No columns yet. Tap + (top right) for a new one."));
     else strip.querySelector(":scope > .co-empty")?.remove();
     drawPos();
+    if (st.listOpen) drawColList();
   }
   function drawCol(c, i) {
     let ce = st.cels.get(c.id);
@@ -438,7 +449,7 @@ export function mount(box, ctx) {
   let scrollT = 0;
   strip.addEventListener("scroll", () => {
     clearTimeout(scrollT);
-    scrollT = setTimeout(() => { const c = cols()[atIdx()]; if (c && st.item) { st.at = c.id; localStorage.setItem(atKey(), c.id); } drawPos(); }, 120);
+    scrollT = setTimeout(() => { if (strip.hidden) return; const c = cols()[atIdx()]; if (c && st.item) { st.at = c.id; localStorage.setItem(atKey(), c.id); } drawPos(); }, 120);
   }, { passive: true });
   const atKey = () => `${AT_KEY}.${st.item?.id || ""}`;
   addEventListener("resize", () => { if (st.item && st.at) showCol(st.at, false); drawPos(); });
@@ -447,6 +458,129 @@ export function mount(box, ctx) {
     if (e.altKey && e.key === "ArrowLeft") { e.preventDefault(); go(-1); }
     if (e.altKey && e.key === "ArrowRight") { e.preventDefault(); go(1); }
   });
+
+  // ------------------------------------------------------------ the column list
+  // A second way in (the rows button): the columns top to bottom like the
+  // thread list. Open = one history step, so browser back, the back arrow and
+  // Esc all return to the board at the column it showed. A tap on a row lands
+  // on that column; hold a row (touch) or drag it (mouse) to reorder: the
+  // others slide aside, it glides into place, saved like @move-column.
+  function openList() {
+    if (!st.item || st.listOpen) return;
+    const c = cols()[atIdx()]; if (c) { st.at = c.id; localStorage.setItem(atKey(), c.id); }
+    pick.hidden = true;
+    history.pushState({ ...(history.state || {}), coList: st.item.id }, "", location.pathname);
+    setListShown(true);
+  }
+  function setListShown(on) {
+    st.listOpen = on; clist.hidden = !on; strip.hidden = on || !st.item;
+    drawHead();
+    if (on) {
+      drawColList(); clist.scrollTop = 0;
+      const a = clist.querySelector("a.here");
+      if (a && a.getBoundingClientRect().bottom > clist.getBoundingClientRect().bottom) clist.scrollTop = a.offsetTop - clist.clientHeight / 2;
+    }
+    ctx.bar.refresh();
+  }
+  // to = the column to land on (default: where it was)
+  function closeList(to) {
+    if (!st.listOpen) return;
+    if (to) { st.at = to; localStorage.setItem(atKey(), to); }
+    if (history.state?.coList) history.back(); else landBoard();
+  }
+  function landBoard() {
+    if (!st.listOpen) return;
+    setListShown(false);
+    if (st.at && findC(st.at)) showCol(st.at, false);
+    drawPos();
+  }
+  addEventListener("popstate", () => { if (st.listOpen && !history.state?.coList) landBoard(); });
+  // a reload starts on the board, never on the list
+  if (history.state?.coList) { const { coList, ...rest } = history.state; history.replaceState(rest, "", location.pathname); }
+  function drawColList() {
+    if (rowDrag) return;
+    const cs = cols();
+    clist.replaceChildren(...cs.map(c => {
+      const n = inCol(c.id).filter(p => !dismissed(p)).length, t = c.title || "Untitled";
+      const a = h("a", { href: location.pathname, class: c.id === st.at ? "here" : null, draggable: "false",
+        "data-id": c.id, "data-k-id": c.id, "data-k-kind": "column", "data-k-label": t, "data-k-order": "",
+        "data-tip": `Open “${t}”; hold and drag to move it`,
+        onclick: ev => { ev.preventDefault(); if (Date.now() - st.noClick > 400) closeList(c.id); } },
+        h("span", { class: "k-it-t" }, t),
+        h("span", { class: "co-cn" }, `${n} panel${n === 1 ? "" : "s"}`));
+      rowHold(a, c.id);
+      return h("li", {}, a);
+    }), ...(cs.length ? [] : [h("li", { class: "k-it-empty" }, "No columns yet. Go back and tap + for a new one.")]));
+  }
+  let rowDrag = null;
+  function rowHold(a, id) {
+    a.addEventListener("dragstart", e => e.preventDefault());
+    a.addEventListener("contextmenu", e => e.preventDefault());
+    a.addEventListener("pointerdown", e => {
+      if (e.button > 0 || rowDrag) return;
+      const x0 = e.clientX, y0 = e.clientY, pid = e.pointerId, mouse = e.pointerType === "mouse";
+      let lifted = false, timer = 0;
+      const lift = () => { lifted = true; startRow(id, y0); try { a.setPointerCapture(pid); } catch { /* synthetic */ } };
+      if (!mouse) timer = setTimeout(lift, HOLD);
+      const move = ev => {
+        if (ev.pointerId !== pid) return;
+        const dist = Math.hypot(ev.clientX - x0, ev.clientY - y0);
+        if (!lifted && dist > SLOP) { if (mouse) lift(); else clearTimeout(timer); } // a finger moving first = a scroll
+        if (lifted) moveRow(ev.clientY);
+      };
+      const end = ev => {
+        if (ev.pointerId !== pid) return;
+        clearTimeout(timer);
+        removeEventListener("pointermove", move, true); removeEventListener("pointerup", end, true); removeEventListener("pointercancel", end, true);
+        if (lifted) { st.noClick = Date.now(); endRow(ev.type === "pointercancel"); }
+      };
+      addEventListener("pointermove", move, true); addEventListener("pointerup", end, true); addEventListener("pointercancel", end, true);
+    });
+    // once lifted, the list must not scroll under the finger
+    a.addEventListener("touchmove", e => { if (rowDrag?.id === id && e.cancelable) e.preventDefault(); }, { passive: false });
+  }
+  const rowEls = () => [...clist.querySelectorAll(":scope > li > a")];
+  function startRow(id, y) {
+    const rows = rowEls(), el = rows.find(r => r.dataset.id === id); if (!el) return;
+    const r = el.getBoundingClientRect();
+    rowDrag = { id, el, y0: y, r, from: rows.indexOf(el), to: rows.indexOf(el), scroll0: clist.scrollTop,
+      others: rows.filter(x => x !== el).map(x => ({ el: x, r: x.getBoundingClientRect() })) };
+    el.classList.add("drag"); box.classList.add("co-busy");
+    navigator.vibrate?.(15);
+  }
+  function moveRow(y) {
+    const d = rowDrag; if (!d) return;
+    const lr = clist.getBoundingClientRect();
+    if (y < lr.top + 40) clist.scrollTop -= 10; else if (y > lr.bottom - 40) clist.scrollTop += 10;
+    const ds = clist.scrollTop - d.scroll0, dy = y - d.y0 + ds;
+    d.el.style.transform = `translateY(${dy}px)`;
+    const mid = d.r.top + d.r.height / 2 + dy - ds;
+    let to = 0;
+    for (const o of d.others) if (mid > o.r.top - ds + o.r.height / 2) to++;
+    d.to = to;
+    d.others.forEach((o, i) => {
+      const was = i >= d.from ? i + 1 : i, now = i >= to ? i + 1 : i;
+      o.el.style.transform = now === was ? "" : `translateY(${(now - was) * d.r.height}px)`;
+      o.el.classList.add("glide");
+    });
+  }
+  function endRow(cancelled) {
+    const d = rowDrag; if (!d) return;
+    const was = new Map(rowEls().map(x => [x.dataset.id, x.getBoundingClientRect()])); // where they are seen now
+    rowDrag = null; box.classList.remove("co-busy");
+    for (const o of d.others) { o.el.style.transform = ""; o.el.classList.remove("glide"); }
+    d.el.classList.remove("drag"); d.el.style.transform = "";
+    if (!cancelled && d.to !== d.from) moveCol(d.id, d.to + 1); else drawColList();
+    // FLIP: rows drawn where they were seen, then eased into their places
+    for (const x of rowEls()) {
+      const a = was.get(x.dataset.id); if (!a) continue;
+      const dy = a.top - x.getBoundingClientRect().top; if (Math.abs(dy) < 1) continue;
+      x.style.transform = `translateY(${dy}px)`; void x.offsetWidth;
+      x.classList.add("glide"); x.style.transform = "";
+      setTimeout(() => x.classList.remove("glide"), GLIDE + 60);
+    }
+    if (st.later) { const it = st.later; st.later = null; if (it.updated > st.baseAt) takeRemote(it); }
+  }
 
   // ------------------------------------------------------------ reordering: hold, then drag
   // A finger (or the mouse) on a title bar: moving under SLOP and lifting =
@@ -628,7 +762,9 @@ export function mount(box, ctx) {
     if (dy) list.scrollBy({ top: dy, behavior: smooth ? "smooth" : "auto" });
   }
   function reveal(id) {
-    const p = findP(id); showCol(p ? p.col : id);
+    const p = findP(id);
+    if (st.listOpen) { closeList(p ? p.col : id); if (p) setTimeout(() => intoView(id), 300); return; }
+    showCol(p ? p.col : id);
     if (p) setTimeout(() => intoView(id), 300);
   }
   function tapP(id) {
@@ -687,7 +823,11 @@ export function mount(box, ctx) {
     pick.style.top = (b.bottom - r.top + 4) + "px"; pick.style.right = Math.max(4, r.right - b.right) + "px";
   }
   addEventListener("pointerdown", e => { if (!pick.hidden && !pick.contains(e.target) && !addBtn.contains(e.target)) pick.hidden = true; }, true);
-  addEventListener("keydown", e => { if (e.key === "Escape") pick.hidden = true; });
+  addEventListener("keydown", e => {
+    if (e.key !== "Escape") return;
+    if (!pick.hidden) { pick.hidden = true; return; }
+    if (st.listOpen && box.getClientRects().length && !e.target.closest?.("input, textarea, [contenteditable]")) closeList();
+  });
 
   // ------------------------------------------------------------ the agent: describe + @lines
   const NOTE_MAX = 4000;
@@ -715,6 +855,7 @@ export function mount(box, ctx) {
     const notes = data().agentNotes ? `[Agent notes, hidden from ${WHO}'s view, kept with the columns]\n${data().agentNotes}\n[End of agent notes]\n\n` : "";
     return `${notes}[Sent from the Sleipnyr Columns board "${(data().title || "").replace(/"/g, "'")}" (${st.item.id}): named columns side by side, one per topic ${WHO} keeps in mind, each a list of foldable panels `
       + `top to bottom (a phone shows one column at a time and swipes between them${matchMedia("(max-width: 760px)").matches ? "; the user is on a phone now" : ""}).\n`
+      + (st.listOpen ? `${WHO} has the column list open (the columns as rows, to pick or reorder one; @show <column> closes it and lands there).\n` : "")
       + `Columns are named by id, title or number (1 = leftmost). Actions, exactly:\n`
       + `@column <title>   (a new column at the right)\n@rename-column <column> <title>\n@move-column <column> <position>\n@remove-column <column>   (only an empty one)\n@show <column>   (swipe to it)\n`
       + `@note <column> <title>   (a new note at the bottom; its Markdown text on the next lines, then a line @end; keep it short)\n`
@@ -759,7 +900,7 @@ export function mount(box, ctx) {
       case "rename-column": { const c = needC(first); c.title = rest.join(" ").trim().slice(0, 80) || c.title; draw(); return `rename-column ${c.id}`; }
       case "move-column": moveCol(first, rest[0]); return `move-column ${first}`;
       case "remove-column": return `remove-column ${dropCol(first).id}`;
-      case "show": showCol(needC(a).id); return `show ${a}`;
+      case "show": { const c = needC(a); if (st.listOpen) closeList(c.id); else showCol(c.id); return `show ${a}`; }
       case "note": { const c = needC(first); return `note ${addP(c.id, "note", text || "", rest.join(" ") || "Note").id}`; }
       case "edit": setNote(first, text || rest.join(" ")); return `edit ${first}`;
       case "add": {
@@ -818,6 +959,7 @@ export function mount(box, ctx) {
   async function show(sub) {
     const mine = ++showing;
     pick.hidden = true; say("");
+    if (st.listOpen && !(sub && history.state?.coList === sub)) setListShown(false);
     if (!sub && st.list.length) {
       // back to the list: shown at once from what we have, refreshed behind it
       // (a slow or stalled phone connection must never keep him on the board)
@@ -850,13 +992,14 @@ export function mount(box, ctx) {
       st.at = localStorage.getItem(atKey()) || (it.data.chatView === ME ? localStorage.getItem(AT_KEY) || "" : "");
     }
     st.last = it.id;
-    drawHead(); boards.el.hidden = true; strip.hidden = false;
+    drawHead(); boards.el.hidden = true; strip.hidden = st.listOpen; clist.hidden = !st.listOpen;
     embed(viewOf(st.item), `${st.item.data.title || "Board"} conversation`);
     await loadThreads();
     if (mine !== showing) return;
     draw();
     // back to the column this device showed last on this board, before any waiting @lines run
-    if (st.at && findC(st.at)) showCol(st.at, false); else strip.scrollLeft = 0;
+    if (st.listOpen) drawColList();
+    else if (st.at && findC(st.at)) showCol(st.at, false); else strip.scrollLeft = 0;
     drawPos();
     ctx.bar.focus(hereP() ? WIN : ME);
     chat?.retry?.();
@@ -878,6 +1021,12 @@ export function mount(box, ctx) {
     },
     order: (ids, { into, at }) => {
       if (!st.item) throw new Error("open a board first");
+      if (ids.length && ids.every(id => cols().some(c => c.id === id))) { // columns trade places
+        const cs = cols().slice(), slots = ids.map(id => cs.findIndex(c => c.id === id)).sort((a, b) => a - b);
+        slots.forEach((k, i) => { cs[k] = cols().find(c => c.id === ids[i]); });
+        const was = rects(); data().columns = cs; draw(); glideFrom(was); save();
+        return `reordered ${ids.length} column(s)`;
+      }
       const ps = ids.map(needP);
       if (into) { ps.forEach((p, i) => moveP(p.id, into, at ? at + i : "")); return `moved ${ps.length} panel(s) into ${needC(into).title}`; }
       const ci = id => cols().findIndex(c => c.id === id);

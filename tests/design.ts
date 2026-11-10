@@ -39,6 +39,7 @@ const STATES: State[] = [
   { name: "tinder", path: "/m/tinder", ready: ".tt-card, .tt-empty, [class^=tt-]" },
   { name: "columns-list", path: "/m/columns", ready: "[data-k-kind]" },
   { name: "columns", path: `/m/columns/${colBoard}`, ready: ".co-panel" },
+  { name: "columns-col-list", path: `/m/columns/${colBoard}`, ready: ".co-listb", act: click(".co-listb") },
   { name: "columns-add-menu", path: `/m/columns/${colBoard}`, ready: ".co-add", act: click(".co-add"), popover: ".co-pick" },
   { name: "blackboards", path: "/m/blackboards", ready: "[data-k-kind]" },
   { name: "blackboard", path: `/m/blackboards/${board}`, ready: ".ss-win" },

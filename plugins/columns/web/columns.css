@@ -49,6 +49,13 @@
 .co-chead .c-ic:disabled { visibility: hidden; }
 .co-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: .75rem; padding: .75rem; overscroll-behavior-y: contain; }
 
+/* the column list (rows button): .k-items rows like the thread list; hold + drag reorders */
+.co-clist a { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.co-clist a.drag { position: relative; z-index: 5; will-change: transform; background: var(--surface); box-shadow: var(--shadow-drag); border-left-color: var(--text); }
+.co-clist a.glide { transition: transform var(--co-glide) var(--co-ease); }
+.co-cn { color: var(--text-muted); font-size: .8em; flex: none; }
+.co-busy .co-clist a { cursor: grabbing; }
+
 /* a panel: a title bar (tap folds, hold + drag reorders), then its content */
 .co-panel {
   position: relative; flex: none; display: flex; flex-direction: column; background: var(--bg);
