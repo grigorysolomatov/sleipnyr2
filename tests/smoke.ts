@@ -27,9 +27,9 @@ try {
       if (bootError) throw new Error(bootError);
       if (thread) {
         await p.goto(`${url}/i/${encodeURIComponent(thread)}`);
-        await p.waitFor(`document.querySelectorAll(".c-msg").length > 0`);
-        const shown = await p.eval<number>(`document.querySelectorAll(".c-msg").length`);
-        const visible = await p.eval<boolean>(`!!document.querySelector(".c-msg")?.getClientRects().length`);
+        await p.waitFor(`document.querySelectorAll(".c-log .c-msg").length > 0`);
+        const shown = await p.eval<number>(`document.querySelectorAll(".c-log .c-msg").length`);
+        const visible = await p.eval<boolean>(`!!document.querySelector(".c-log .c-msg")?.getClientRects().length`);
         if (!visible) throw new Error("messages are in the page but not visible");
         console.log(`${name}: thread ${thread} shows ${shown} of ${count} messages`);
       } else if (threads.length) throw new Error("no thread with messages to open");
