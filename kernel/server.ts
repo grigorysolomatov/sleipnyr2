@@ -328,7 +328,8 @@ export async function createApp(config: Config) {
     }
     if (what === "push") {
       // GET key = the VAPID public key; subscribe {subscription, label} / unsubscribe {endpoint};
-      // here {endpoint, tags}: what this device shows now ([] = nothing); devices; test {endpoint?, title?, body?}
+      // here {endpoint, tags}: what this device shows now ([] = nothing); devices; test {endpoint?, title?, body?};
+      // notify {tag, title, body?, url?}: one notification to every device (local services, e.g. Kanban needs-you)
       const body = async () => (await req.json().catch(() => ({}))) as Record<string, any>;
       try {
         if (id === "key" && m === "GET") return json({ key: await push.publicKey() });
@@ -336,6 +337,14 @@ export async function createApp(config: Config) {
         if (id === "subscribe" && m === "POST") { const b = await body(); return json(push.add(b.subscription, String(b.label || "")), 201); }
         if (id === "unsubscribe" && m === "POST") { const b = await body(); return json({ removed: push.remove(String(b.endpoint || "")) }); }
         if (id === "here" && m === "POST") { const b = await body(); push.setHere(b.endpoint, b.tags ?? []); return json({ ok: true }); }
+        if (id === "notify" && m === "POST") {
+          // local services (Kanban bridge): {tag, title, body?, url?}; tag "needs:<card>" etc., one slot per tag
+          const b = await body(), tag = String(b.tag || ""), title = String(b.title || "");
+          if (!/^[a-z]+:[\w.-]{1,80}$/.test(tag) || !title) return json({ error: "tag (kind:id) and title required" }, 400);
+          const url0 = String(b.url || "/");
+          const res = await pushService.notify({ tag, title: title.slice(0, 120), body: String(b.body || "").slice(0, 300), url: url0.startsWith("/") && !url0.startsWith("//") ? url0 : "/" });
+          return json({ sent: res.length, results: res.map(r => ({ host: new URL(r.endpoint).host, status: r.status, ok: r.ok, dropped: !!r.dropped, error: r.error })) });
+        }
         if (id === "test" && m === "POST") {
           const b = await body(), only = typeof b.endpoint === "string" && b.endpoint ? b.endpoint : undefined;
           if (only && !push.has(only)) return json({ error: "this device is not subscribed" }, 404);

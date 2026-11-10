@@ -15,7 +15,9 @@ Hermes' own notify subscriptions only reach gateway platforms, so this service c
     3. the Hermes session whose tool output created the card ("Created t_x", --json output, or
        kanban_create's task_id) in Hermes' state.db, when its id carries the session prefix,
     4. the same for the card that created it, up to 3 levels;
-  and post a notice into that thread (POST <app>/p/chat/threads/<id>/notices). The app shows one
+  and post a notice into that thread (POST <app>/p/chat/threads/<id>/notices). A card that waits for
+  the user (blocked needs_input or "You need to: ...") and has no origin thread goes to the phone
+  instead (POST <app>/k/push/notify, tag needs:<card>); with a thread, the agent's reply pushes. The app shows one
   quiet line ("Card t_x done: title") and runs a real agent turn with the full text, so the agent
   reports the result in its own voice; the reply marks the thread unread.
 Idempotent: every notice carries a key (board, card, event id); the app ignores repeats.
@@ -206,6 +208,30 @@ def post(thread, line, text, key, dry):
     return True
 
 
+# --- phone notification for needs-you cards without an origin thread -------------------------------------------
+def needs_you(kind, p):
+    """A block that waits for the user: kind needs_input, or a reason starting "You need to:"."""
+    return kind == "blocked" and (p.get("kind") == "needs_input"
+                                  or str(p.get("reason") or "").lstrip().lower().startswith("you need to"))
+
+
+def push_needs(slug, tid, title, p, dry):
+    """One phone notification per card (tag needs:<card>: a newer one replaces it). Never raises."""
+    reason = re.sub(r"\{\{[^}]*\}\}", "", str(p.get("reason") or "")).strip()
+    note = {"tag": f"needs:{tid}", "title": f"Needs you · {first(title, 80)}",
+            "body": first(reason or title, 280), "url": "/"}
+    if dry:
+        print(f"--- would push: {note}\n")
+        return
+    try:
+        req = urllib.request.Request(f"{APP}/k/push/notify", method="POST", data=json.dumps(note).encode(),
+                                     headers={"content-type": "application/json"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            log(f"push needs:{tid} ({slug}) -> HTTP {r.status} {r.read()[:200].decode(errors='replace')}")
+    except Exception as e:
+        log(f"push needs:{tid} ({slug}) failed: {e}")
+
+
 # --- loop --------------------------------------------------------------------------------------------------------
 def one_pass(cursors, dry):
     watch = load("watch.json", {})
@@ -229,6 +255,8 @@ def one_pass(cursors, dry):
                 skip = kind == "blocked" and (p.get("kind") == "dependency" or p.get("reason") == "initial_status"
                                               or PAUSE.search(str(p.get("reason") or "")))
                 thread = None if skip else origin(con, slug, tid, watch)
+                if not skip and not (thread and THREAD.match(thread)) and needs_you(kind, p):
+                    push_needs(slug, tid, title, p, dry)  # no chat to report into: the phone still hears it
                 if thread and THREAD.match(thread):
                     line, text = notice(con, slug, tid, kind, p, title)
                     try:

@@ -149,6 +149,17 @@ describe("kernel push", () => {
     answer = 201;
     expect((await call("GET", "/k/push/devices")).body.devices.length).toBe(0);
   });
+  test("POST /k/push/notify (Kanban needs-you): kind:id tag, same-origin url, reaches every device", async () => {
+    const d = await device();
+    await call("POST", "/k/push/subscribe", { subscription: d.sub });
+    expect((await call("POST", "/k/push/notify", { tag: "bad tag", title: "x" })).status).toBe(400);
+    expect((await call("POST", "/k/push/notify", { tag: "needs:t_1" })).status).toBe(400);
+    got.length = 0;
+    expect((await call("POST", "/k/push/notify", { tag: "needs:t_1", title: "Needs you · X", body: "Pick A or B", url: "https://evil.example/" })).body)
+      .toMatchObject({ sent: 1, results: [{ ok: true, status: 201 }] });
+    expect(await received(d)).toMatchObject({ tag: "needs:t_1", title: "Needs you · X", body: "Pick A or B", url: "/" });
+    await call("POST", "/k/push/unsubscribe", { endpoint: d.sub.endpoint });
+  });
   test("Settings > Features > Notifications off: no push at all", async () => {
     const d = await device();
     await call("POST", "/k/push/subscribe", { subscription: d.sub });
