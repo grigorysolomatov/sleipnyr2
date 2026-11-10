@@ -45,6 +45,7 @@ const FEATURES = [
   ["recent", "Recent conversations", "The modality list shows the latest conversations at the top"],
   ["panelDecisions", "Panel decisions", "Columns panels can carry Dismiss, Comment and Accept (off by default)"],
   ["recordingContext", "Recording context", "A voice message tells the agent what you looked at and tapped while recording"],
+  ["notifications", "Notifications", "Phone notifications for agent replies, finished cards and things that need you"],
 ];
 const ROWS = GROUPS.flatMap(([, rows]) => rows);
 const SIZES = new Set(["radius", "font-size"]);
@@ -137,6 +138,31 @@ export function mount(box, ctx) {
   const drawFeatureRows = () => featRows.replaceChildren(...featureNames().map(([k, name, doc]) =>
     toggle(`feature.${k}`, name, doc, () => st.app.features?.[k] !== false, on => saveApp({ features: { [k]: on } }))));
   drawFeatureRows();
+  // this device's notifications: the permission prompt needs a tap, so it is a button here
+  const pushDoc = h("small", {}, "");
+  const pushBtns = h("span", { class: "tm-acts" });
+  const pushRow = h("li", { class: "tm-row", "data-k-id": "push.device", "data-k-kind": "setting", "data-k-label": "Notifications on this device" },
+    h("span", { class: "tm-t" }, h("b", {}, "This device"), pushDoc), pushBtns);
+  const act = (label, tip, fn) => h("button", { class: "tm-act", type: "button", "data-tip": tip, onclick: async e => {
+    const b = e.currentTarget; b.disabled = true; say("");
+    try { await fn(); } catch (err) { say(err.message || String(err), true); }
+    b.disabled = false; drawPush();
+  } }, label);
+  async function drawPush() {
+    const p = ctx.push, s = p ? await p.state() : { supported: false };
+    if (!s.supported) { pushDoc.textContent = "This browser cannot show notifications (on iPhone: add the app to the home screen first)"; pushBtns.replaceChildren(); return; }
+    if (s.perm === "denied") { pushDoc.textContent = "Blocked in the browser: allow notifications for this site in its settings, then reload"; pushBtns.replaceChildren(); return; }
+    pushDoc.textContent = s.on ? "Notifications arrive on this device" : "No notifications on this device yet";
+    pushBtns.replaceChildren(...(s.on
+      ? [act("Test", "Send a test notification to this device", async () => {
+          const r = await p.test(); const bad = (r.results || []).filter(x => !x.ok);
+          say(bad.length ? `Test not delivered: ${bad.map(x => `${x.host} ${x.status} ${x.error || ""}`).join("; ")}` : "Test sent: it should appear in a few seconds.", !!bad.length);
+        }),
+        act("Turn off", "Stop notifications on this device", () => p.disable())]
+      : [act("Enable", "Ask this device for permission and turn notifications on", async () => { await p.enable(); say("Notifications are on for this device."); })]));
+  }
+  const pushRows = h("ul", { class: "tm-rows", role: "list" }, pushRow);
+  drawPush();
   // Picker: one 'Show in picker' switch per modality (hidden ones stay reachable by address)
   const hiddenIds = () => st.app.pickerHidden || ctx.app?.pickerHidden || [];
   const pickRows = h("ul", { class: "tm-rows", role: "list" });
@@ -151,7 +177,7 @@ export function mount(box, ctx) {
     h("h2", { class: "tm-sh" }, title), ...kids);
   body.append(
     section("Theme", preview, list),
-    section("Features", h("section", { class: "tm-group" }, featRows)),
+    section("Features", h("section", { class: "tm-group" }, featRows, pushRows)),
     section("Picker", h("section", { class: "tm-group" }, pickRows)),
     section("Data", h("section", { class: "tm-group" }, dataRows)));
 

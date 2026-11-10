@@ -237,6 +237,19 @@ export interface Kernel {
   log(...args: unknown[]): void;
   /** the app settings the user changes in Settings (kernel-owned, read-only here) */
   settings(): AppSettings;
+  /** phone notifications (Web Push, kernel/push.ts); absent in kernels without it */
+  push?: PushService;
+}
+
+/** One phone notification. tag = its slot on the phone: a newer one with the same tag replaces it
+ *  (e.g. "thread:<id>"); url = where a tap opens the app (same origin). */
+export interface PushNote { title: string; body?: string; tag?: string; url?: string; test?: boolean }
+/** Sends to every subscribed device except one showing that tag right now; nothing while Settings >
+ *  Features > Notifications is off. Never throws for delivery problems. */
+export interface PushService {
+  notify(n: PushNote): Promise<{ ok: boolean; status: number }[]>;
+  /** whether some device shows this tag now */
+  looking(tag: string): boolean;
 }
 
 /** App settings changed by hand in Settings (one kernel-owned item of type "settings").

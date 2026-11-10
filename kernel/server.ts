@@ -10,6 +10,7 @@ import {
   type Events, type Handler, type Kernel, type Manifest, type ServerPlugin, type Services,
 } from "./contract.ts";
 import { Actions, type ActionsConfig } from "./actions.ts";
+import { Push } from "./push.ts";
 import { Store } from "./store.ts";
 
 const ROOT = resolve(import.meta.dir, "..");
@@ -166,6 +167,7 @@ export async function createApp(config: Config) {
   const events = eventBus(), services = serviceRegistry();
   store.onChange = item => events.publish(ITEM_TOPIC, { item });
   store.onRemove = item => events.publish(ITEM_TOPIC, { item, removed: true });
+  const push = new Push(store.db, config.dataDir);
 
   // ---- app settings: one kernel-owned item, changed by hand in Settings
   const VIEW_NOTES_MAX = 4000;
@@ -224,7 +226,10 @@ export async function createApp(config: Config) {
   // deleting is a gated capability: refused unless Settings > Data allows it
   const gated = (items: Items): Items => ({ ...items, remove: (id: string) => { if (!settings().allowDelete) throw offError(); return items.remove(id); } });
 
-  const kernelFor = (id: string): Kernel => ({
+  // phone notifications: the feature switch "notifications" (default on) stops every push
+  const pushOn = () => settings().features.notifications !== false;
+  const pushService = { notify: (n: Parameters<Push["notify"]>[0]) => (pushOn() ? push.notify(n) : Promise.resolve([])), looking: (t: string) => push.looking(t) };
+  const kernelFor = (id: string): Kernel => ({ push: pushService,
     contract: CONTRACT_VERSION, items: gated(store.items(id)), links: store.links(), files: store.files(id), settings,
     events, services, config: config.plugins[id] || {}, user: config.user, privateDir: join(config.dataDir, "private", id), app: { ...config.app, agentName: config.app.agentName || "Agent" },
     log: (...a) => console.log(`[${id}]`, ...a),
@@ -320,6 +325,26 @@ export async function createApp(config: Config) {
       }
       return new Response(bytes, { headers });
     }
+    if (what === "push") {
+      // GET key = the VAPID public key; subscribe {subscription, label} / unsubscribe {endpoint};
+      // here {endpoint, tags}: what this device shows now ([] = nothing); devices; test {endpoint?, title?, body?}
+      const body = async () => (await req.json().catch(() => ({}))) as Record<string, any>;
+      try {
+        if (id === "key" && m === "GET") return json({ key: await push.publicKey() });
+        if (id === "devices" && m === "GET") return json({ on: pushOn(), devices: push.devices() });
+        if (id === "subscribe" && m === "POST") { const b = await body(); return json(push.add(b.subscription, String(b.label || "")), 201); }
+        if (id === "unsubscribe" && m === "POST") { const b = await body(); return json({ removed: push.remove(String(b.endpoint || "")) }); }
+        if (id === "here" && m === "POST") { const b = await body(); push.setHere(b.endpoint, b.tags ?? []); return json({ ok: true }); }
+        if (id === "test" && m === "POST") {
+          const b = await body(), only = typeof b.endpoint === "string" && b.endpoint ? b.endpoint : undefined;
+          if (only && !push.has(only)) return json({ error: "this device is not subscribed" }, 404);
+          const res = await push.notify({ tag: "test", test: true, title: String(b.title || `${config.app.shortName}: test`).slice(0, 120),
+            body: String(b.body || "Notifications work on this device.").slice(0, 300), url: "/m/settings" }, { only, ttl: 600 });
+          return json({ sent: res.length, results: res.map(r => ({ host: new URL(r.endpoint).host, status: r.status, ok: r.ok, dropped: !!r.dropped, error: r.error })) });
+        }
+      } catch (e) { return json({ error: (e as Error).message }, (e as { status?: number }).status || 400); }
+      return json({ error: "not found" }, 404);
+    }
     if (what === "events" && m === "GET") return sse(events, url.searchParams.getAll("topic"), req);
     if (what === "mcp") return actions.mcp(req);
     if (what === "actions" && !id && m === "GET") return json(actions.recent(Number(url.searchParams.get("limit")) || 50));
@@ -357,12 +382,12 @@ export async function createApp(config: Config) {
   };
 
   const stop = async () => { for (const p of plugins) await p.server?.stop?.(); store.db.close(); };
-  return { fetch, stop, plugins, store, events, actions };
+  return { fetch, stop, plugins, store, events, actions, push: pushService };
 }
 
 function webManifest(c: Config) {
   return {
-    name: c.app.name, short_name: c.app.shortName, start_url: "/", scope: "/", display: "standalone",
+    id: "/", name: c.app.name, short_name: c.app.shortName, start_url: "/", scope: "/", display: "standalone",
     background_color: "#000000", theme_color: "#000000",
     icons: [
       { src: "/web/icons/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },

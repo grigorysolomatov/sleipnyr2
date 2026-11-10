@@ -68,6 +68,11 @@
 .tm-step { display: flex; align-items: center; flex: none; border: 1px solid var(--line); border-radius: var(--radius); }
 .tm-sb { width: 2.25rem; height: 2.25rem; padding: 0; background: none; border: none; color: var(--text); font: inherit; font-size: 1.1rem; cursor: pointer; }
 .tm-sb:hover { color: var(--text-muted); }
+/* text buttons in a row (notifications on this device: Enable / Test / Turn off) */
+.tm-acts { flex: none; display: flex; gap: .4rem; }
+.tm-act { padding: .35rem .7rem; background: none; border: 1px solid var(--text); border-radius: var(--radius); color: var(--text); font: inherit; font-size: .9em; cursor: pointer; }
+.tm-act:hover { color: var(--text-muted); border-color: var(--text-muted); }
+.tm-act:disabled { opacity: .5; cursor: default; }
 .tm-num { min-width: 3.4rem; text-align: center; font-variant-numeric: tabular-nums; font-size: .85em; }
 .tm-col { display: flex; align-items: center; gap: .6rem; flex: none; }
 .tm-row > .tm-step { width: 8.45rem; justify-content: space-between; } /* as wide as swatch + gap + hex, so the resets line up */

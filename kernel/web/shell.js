@@ -43,6 +43,7 @@
 
 import { createActions, effectStyle, sleep } from "./actions.js";
 import { createBar, tooltips } from "./bar.js";
+import { createPush } from "./push.js";
 import { ONE_SENTENCE, runs } from "./hcp.js";
 
 const root = document.getElementById("app");
@@ -291,6 +292,7 @@ async function boot() {
   const restyleOn = new Map(info.plugins.flatMap(p => (p.web?.restyleOn || []).map(t => [t, p.id])));
   if (restyleOn.size) on("item", ({ item }) => { const p = restyleOn.get(item?.type); if (p) restyle(p); });
   ctx.bar = createBar(ctx, root);
+  ctx.push = framed ? { shows: () => () => {}, state: async () => ({ supported: false, perm: "", on: false }) } : createPush(ctx); // phone notifications
   root.append(ctx.bar.el);
   if (framed) { root.classList.add("k-framed"); window.__kSend = body => ctx.bar.deliver(body); }
   else { window.__kOn = on; window.__kOnReconnect = fn => { reconnects.add(fn); return () => reconnects.delete(fn); }; }

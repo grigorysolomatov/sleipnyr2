@@ -1280,6 +1280,11 @@ export async function mount(root, ctx) {
     else if (k === "t") { e.preventDefault(); ctx.levels?.show("chat"); showList(); mb.focus("threads"); list.querySelector("a")?.focus(); }
   });
   addEventListener("popstate", () => { if (ctx.levels && ctx.levels.current() !== "chat") return; const id = ctx.route(); id ? openThread(id, false) : showList(false); });
+  // phone notifications: the threads on screen (open thread, embedded strip) need none on this device
+  ctx.push?.shows(() => [
+    st.open && shell.classList.contains("thread-open") && shell.offsetParent ? `thread:${st.open}` : "",
+    st.hist && !strip.hidden && strip.offsetParent ? `thread:${st.hist.id}` : "",
+  ].filter(Boolean));
 
   await loadAgents();
   await loadThreads();

@@ -29,7 +29,7 @@
 import { bad, ITEM_TOPIC } from "../../kernel/contract.ts";
 import { cleanRecording, recordingNote, FEATURE as RECORDING, type Recording } from "./recording.ts";
 import type {
-  AgentService, AgentTurn, AttachedFile, FileData, Item, Kernel, ServerPlugin, TranscribeService,
+  AgentService, AgentTurn, AttachedFile, FileData, Item, Kernel, PushNote, ServerPlugin, TranscribeService,
 } from "../../kernel/contract.ts";
 
 export interface Thread { title: string; titleAuto?: boolean; agent: string; state: Record<string, unknown>; hidden?: boolean; view?: string; unread?: boolean;
@@ -611,6 +611,7 @@ class Chat {
           this.publish(threadId, replyId, { progress: "" });
           this.maybeRetitle(threadId);
           if (user.data.notice && !thread.data.view) this.k.items.update<Thread>(threadId, { unread: true }); // news nobody asked for: bold in the list
+          this.pushReply(threadId, acts ? acts.text : out.text, out.files.length);
           // messages sent into this turn that it never took in: they get their own turns, next
           if (ev.unsent && a.steered.length) for (const j of [...a.steered].reverse()) {
             this.k.items.update(j.userId, { steered: false });
@@ -631,6 +632,13 @@ class Chat {
       if (this.stopping.signal.aborted) { this.k.items.update(replyId, { text: reply }); return; } // resumed after restart
       fail((e as Error).message || String(e));
     }
+  }
+
+  /** A finished reply as a phone notification (devices showing the thread get none: kernel push presence). */
+  pushReply(threadId: string, text: string, files: number) {
+    const t = this.k.items.get<Thread>(threadId);
+    if (!this.k.push || !t) return;
+    this.k.push.notify(replyNote(t, text, files, this.k.app.agentName || "Agent")).catch(e => console.error("push:", e));
   }
 
   /** Turns interrupted by a restart: follow their agent run again. */
@@ -680,6 +688,19 @@ class Chat {
 }
 
 let chat: Chat | null = null;
+
+/** The notification for a finished reply: one per thread (tag thread:<id>); a tap opens that thread, or for a
+ * view's own conversation the view it belongs to (data.place); body = the reply as plain text. */
+export function replyNote(t: Item<Thread>, text: string, files: number, agent: string): PushNote {
+  const pl = t.data.place, view = t.data.view;
+  const url = !view ? `/i/${encodeURIComponent(t.id)}`
+    : !pl ? "/" : pl.level === "picker" ? "/m" : `/m/${encodeURIComponent(pl.level)}${pl.sub ? "/" + encodeURIComponent(pl.sub) : ""}`;
+  const title = ((view ? pl?.name : "") || t.data.title || agent).slice(0, 120);
+  const plain = text.replace(/```[\s\S]*?```/g, " ").replace(/^@\S.*$/gm, "").replace(/^MEDIA:\S+$/gm, "").replace(/[*_`#>]+/g, "").replace(/\s+/g, " ").trim();
+  const body = plain ? (plain.length > 180 ? plain.slice(0, 179) + "\u2026" : plain)
+    : files ? `${agent} sent ${files === 1 ? "a file" : files + " files"}` : `${agent} replied`;
+  return { tag: `thread:${t.id}`, title, body, url };
+}
 
 class HttpError extends Error { constructor(readonly status: number, message: string) { super(message); } }
 
