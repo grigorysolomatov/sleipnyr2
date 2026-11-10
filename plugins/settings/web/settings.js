@@ -1,6 +1,6 @@
 // Settings: a composed modality for the app's settings by hand, no agent needed.
-// Sections: Theme (below), Features (the app's on/off switches) and Data
-// (whether archived things may be deleted for good). Features and Data are the
+// A short list of groups (Theme, Notifications, Features, Picker, Data); a tap
+// opens one group, the back arrow returns to the list. Features and Data are the
 // kernel's settings item (GET/PATCH /k/settings); every open page follows a
 // change live. Theme:
 // One row per token (what it means, a swatch that opens the colour picker,
@@ -70,11 +70,14 @@ export function mount(box, ctx) {
   const pickerMods = () => (ctx.plugins || []).filter(p => p.modality).map(p => ({ id: p.id, title: p.modality.title || p.name }));
   const rootStyle = document.documentElement.style;
 
-  const back = backButton({ cls: "tm-back", tip: "All modalities", onclick: () => ctx.levels.up() });
+  // one group at a time: page null = the short list of groups, else a group id
+  let page = null;
+  const back = backButton({ cls: "tm-back", tip: "All modalities", onclick: () => (page ? show(null) : ctx.levels.up()) });
+  const title = h("b", { class: "tm-title" }, "Settings");
   const resetAll = h("button", { class: "tm-ic tm-all", type: "button", "data-tip": "Reset everything to the default look", "aria-label": "Reset all", onclick: () => resetEverything() }, svg(RESET));
   const note = h("p", { class: "tm-note", "aria-live": "polite", hidden: true });
   const body = h("div", { class: "tm-body" });
-  box.append(h("header", { class: "tm-bar" }, back, h("b", { class: "tm-title" }, "Settings"), resetAll), body, note);
+  box.append(h("header", { class: "tm-bar" }, back, title, resetAll), body, note);
   const say = (t, err = false) => { note.hidden = !t; note.textContent = t || ""; note.classList.toggle("err", err); };
 
   // ------------------------------------------------------------ preview
@@ -135,9 +138,13 @@ export function mount(box, ctx) {
     return [...FEATURES, ...Object.keys(st.app.features || {}).filter(k => !known.has(k)).map(k => [k, k, "A feature switch from the app config"])];
   };
   const featRows = h("ul", { class: "tm-rows", role: "list" });
-  const drawFeatureRows = () => featRows.replaceChildren(...featureNames().map(([k, name, doc]) =>
-    toggle(`feature.${k}`, name, doc, () => st.app.features?.[k] !== false, on => saveApp({ features: { [k]: on } }))));
-  drawFeatureRows();
+  const notifRows = h("ul", { class: "tm-rows", role: "list" });
+  const drawFeatureRows = () => {
+    const rows = featureNames().map(([k, name, doc]) =>
+      [k, toggle(`feature.${k}`, name, doc, () => st.app.features?.[k] !== false, on => saveApp({ features: { [k]: on } }))]);
+    featRows.replaceChildren(...rows.filter(([k]) => k !== "notifications").map(r => r[1]));
+    notifRows.replaceChildren(...rows.filter(([k]) => k === "notifications").map(r => r[1]), pushRow);
+  };
   // this device's notifications: the permission prompt needs a tap, so it is a button here
   const pushDoc = h("small", {}, "");
   const pushBtns = h("span", { class: "tm-acts" });
@@ -161,7 +168,7 @@ export function mount(box, ctx) {
         act("Turn off", "Stop notifications on this device", () => p.disable())]
       : [act("Enable", "Ask this device for permission and turn notifications on", async () => { await p.enable(); say("Notifications are on for this device."); })]));
   }
-  const pushRows = h("ul", { class: "tm-rows", role: "list" }, pushRow);
+  drawFeatureRows();
   drawPush();
   // Picker: one 'Show in picker' switch per modality (hidden ones stay reachable by address)
   const hiddenIds = () => st.app.pickerHidden || ctx.app?.pickerHidden || [];
@@ -173,13 +180,30 @@ export function mount(box, ctx) {
   const dataRows = h("ul", { class: "tm-rows", role: "list" },
     toggle("data.allowDelete", "Allow deleting", "Archived threads get a delete button; deleting is for good",
       () => st.app.allowDelete === true, on => saveApp({ allowDelete: on })));
-  const section = (title, ...kids) => h("section", { class: "tm-sec", "data-k-id": `section-${title.toLowerCase()}`, "data-k-kind": "section" },
-    h("h2", { class: "tm-sh" }, title), ...kids);
-  body.append(
-    section("Theme", preview, list),
-    section("Features", h("section", { class: "tm-group" }, featRows, pushRows)),
-    section("Picker", h("section", { class: "tm-group" }, pickRows)),
-    section("Data", h("section", { class: "tm-group" }, dataRows)));
+  const section = (id, name, ...kids) => h("section", { class: "tm-sec", hidden: true, "data-k-id": `section-${id}`, "data-k-kind": "section", "data-k-label": name }, ...kids);
+  const PAGES = [
+    ["theme", "Theme", "Colors, text size and corners", section("theme", "Theme", preview, list)],
+    ["notifications", "Notifications", "Phone notifications, and this device", section("notifications", "Notifications", h("section", { class: "tm-group" }, notifRows))],
+    ["features", "Features", "Small on/off switches for the app", section("features", "Features", h("section", { class: "tm-group" }, featRows))],
+    ["picker", "Picker", "Which modalities the picker lists", section("picker", "Picker", h("section", { class: "tm-group" }, pickRows))],
+    ["data", "Data", "Deleting archived things for good", section("data", "Data", h("section", { class: "tm-group" }, dataRows))],
+  ];
+  const chev = svg('<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>');
+  const menu = h("ul", { class: "tm-rows tm-menu", role: "list" }, PAGES.map(([id, name, doc]) =>
+    h("li", { class: "tm-row", "data-k-id": `page-${id}`, "data-k-kind": "page", "data-k-label": name },
+      h("button", { class: "tm-go", type: "button", onclick: () => show(id) },
+        h("span", { class: "tm-t" }, h("b", {}, name), h("small", {}, doc)), chev.cloneNode(true)))));
+  body.append(menu, ...PAGES.map(p => p[3]));
+  function show(id) {
+    page = id;
+    menu.hidden = !!id;
+    for (const [pid, , , el] of PAGES) el.hidden = pid !== id;
+    title.textContent = id ? PAGES.find(p => p[0] === id)[1] : "Settings";
+    back.dataset.tip = id ? "All settings" : "All modalities";
+    resetAll.hidden = id !== "theme";
+    body.scrollTop = 0;
+  }
+  show(null);
 
   function drawApp() {
     for (const [, t] of toggles) {
