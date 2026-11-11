@@ -67,7 +67,7 @@ body {
 .k-items a:hover { background: var(--surface, #0d0d0d); }
 .k-items a.here { border-left-color: var(--accent-here, #ff0088); background: var(--surface, #0d0d0d); }
 .k-it-ar {
-  flex: none; display: grid; place-items: center; width: 2.5rem; height: 2.5rem; margin: -.5rem -.4rem -.5rem 0; padding: 0;
+  flex: none; display: grid; place-items: center; width: 2.5rem; height: 2.5rem; margin: -.5rem 0; padding: 0;
   background: none; border: 0; border-radius: var(--radius, 6px); color: var(--text-muted, #8a8a8a); cursor: pointer;
 }
 .k-it-ar svg { width: 1.2rem; height: 1.2rem; }

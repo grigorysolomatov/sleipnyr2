@@ -7,7 +7,7 @@
 //                           title: it => text, summary: it => text,
 //                           archive: (it, on) => Promise,          // optional
 //                           order: { ids: () => [id...], save: ids => Promise } }); // optional
-// With `archive`, every row ends in a small icon button: Archive on a listed row
+// With `archive`, every row has a small icon button just left of its time: Archive on a listed row
 // (a centred confirm dialog: Cancel / Archive), Restore on an archived one (at
 // once, nothing to confirm). Clicking it never opens the row.
 // With `order`, the listed rows follow that id list (items not in it, e.g. a
@@ -144,8 +144,8 @@ export function itemList({ word = "item", agent = "the agent", href, open, title
       ondragstart: e => e.preventDefault(),
       ...(movable ? { onpointerdown: e => press(e, it, movable) } : {}) },
       h("span", { class: "k-it-t" }, title(it)),
-      h("time", {}, when(it.updated)),
-      archive ? arBtn(it) : null);
+      archive ? arBtn(it) : null,
+      h("time", {}, when(it.updated)));
     // once lifted, the list must not scroll under the finger
     if (movable) a.addEventListener("touchmove", e => { if (drag?.el === a && e.cancelable) e.preventDefault(); }, { passive: false });
     return h("li", {}, a);
