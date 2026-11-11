@@ -259,8 +259,10 @@ export interface PushService {
  *  until Settings sets it).
  *  viewNotes: hidden agent notes per view type (plugin id -> text), shown at the top of
  *  every prompt from any instance of that view (all blackboards, all boards); the
- *  config's app.viewNotes are the defaults, a Settings value (even "") replaces one. */
-export interface AppSettings { allowDelete: boolean; features: Record<string, boolean>; pickerHidden: string[]; viewNotes: Record<string, string> }
+ *  config's app.viewNotes are the defaults, a Settings value (even "") replaces one.
+ *  itemOrder: hand order of a modality's item list (plugin id -> item ids, top first;
+ *  items not listed go on top, newest first), e.g. the Columns board list. */
+export interface AppSettings { allowDelete: boolean; features: Record<string, boolean>; pickerHidden: string[]; viewNotes: Record<string, string>; itemOrder: Record<string, string[]> }
 export const SETTINGS_TYPE = "settings";
 
 export type Handler = (req: Request, params: Record<string, string>) => Response | Promise<Response>;

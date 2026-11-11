@@ -36,7 +36,7 @@
 // copy per column, per panel and per field, so two devices or the agent never
 // overwrite each other. The column on screen is remembered per device.
 import { render } from "/web/text.js";
-import { itemList } from "/web/itemlist.js";
+import { itemList, moveId, orderItems } from "/web/itemlist.js";
 import { darkFrame } from "/web/frame.js";
 import { ONE_SENTENCE, runs } from "/web/hcp.js";
 import { backButton } from "/web/head.js";
@@ -131,7 +131,16 @@ export function mount(box, ctx) {
   const clist = h("ul", { class: "k-items co-clist", role: "list", "aria-label": "Column list", hidden: true,
     "data-k-id": "mode", "data-k-kind": "mode", "data-k-label": "Column list: the columns as rows (a tap opens that column, hold and drag reorders)" });
   const boards = itemList({ word: "board", agent: AG, href: it => `/m/${ME}/${encodeURIComponent(it.id)}`, open: it => ctx.levels.go(ME, it.id),
-    title: it => it.data.title || "Untitled board", summary: it => boardSummary(it) });
+    title: it => it.data.title || "Untitled board", summary: it => boardSummary(it),
+    archive: async (it, on) => { await patchBoard(it.id, { hidden: on ? true : null }); drawList(); },
+    order: { ids: () => boardOrder(), save: saveOrder } });
+  // the board list's hand order: kernel settings itemOrder.columns (top first; new boards go on top)
+  const boardOrder = () => ctx.settings?.().itemOrder?.[ME] || [];
+  async function saveOrder(ids) {
+    const s = await ctx.api("/k/settings", { method: "PATCH", json: { itemOrder: { [ME]: ids } } });
+    ctx.settingsChanged?.(s);
+  }
+  ctx.onSettings?.(() => { if (!st.item && ctx.levels.current() === ME && !boards.busy()) drawList(); });
   const note = h("p", { class: "co-note", "aria-live": "polite", hidden: true });
   const pick = h("div", { class: "co-pick k-pop", hidden: true, role: "menu" });
   const fileIn = h("input", { type: "file", hidden: true, onchange: () => addFile() });
@@ -838,12 +847,12 @@ export function mount(box, ctx) {
   const clip = (t, n) => (t.length > n ? `${t.slice(0, n)}… (${t.length - n} more characters; ask to see the full text)` : t);
   const describeList = () => {
     const line = it => `- ${it.id} | ${(it.data.title || "Untitled board").replace(/\s+/g, " ")} | ${boardSummary(it)} | updated ${new Date(Number(it.updated)).toISOString()}`;
-    const shown = st.list.filter(it => !it.data.hidden), hidden = st.list.filter(it => it.data.hidden);
-    return `[Sent from the Sleipnyr Columns board list: ${WHO}'s Columns boards (each a set of named columns of foldable panels), newest first.\n`
+    const shown = orderItems(st.list.filter(it => !it.data.hidden), boardOrder()), hidden = st.list.filter(it => it.data.hidden);
+    return `[Sent from the Sleipnyr Columns board list: ${WHO}'s Columns boards (each a set of named columns of foldable panels), in the order shown (top first; ${WHO} can drag them).\n`
       + `Boards (id | title | size | last updated):\n${shown.map(line).join("\n") || "(none)"}\nArchived (hidden) boards:\n${hidden.map(line).join("\n") || "(none)"}\n`
       + `This chat is the board list's own history; the list acts on your reply. ${ONE_SENTENCE}, `
       + `then one line per action, exactly:\n@open <board id>\n@new [title]   (a new board, opened at once; default title = today)\n@rename <board id> <title>\n`
-      + `@hide <board id>   (archive; nothing is deleted)\n@unhide <board id>\n`
+      + `@hide <board id>   (archive; nothing is deleted)\n@unhide <board id>\n@move-board <board id> <position>   (1 = top of the list)\n`
       + `${runs("list")} Use only ids listed above. Never delete anything.]`;
   };
   const describe = async () => {
@@ -890,6 +899,12 @@ export function mount(box, ctx) {
       case "new": { const it = await newBoard(a); if (!it) throw new Error("could not make a board"); return `new ${it.id}`; }
       case "rename": need(); await patchBoard(first, { title: rest.join(" ").trim().slice(0, 80) || "Untitled board" }); drawList(); return `rename ${first}`;
       case "hide": case "unhide": need(); await patchBoard(first, { hidden: name === "hide" ? true : null }); drawList(); return `${name} ${first}`;
+      case "move-board": {
+        if (need().data.hidden) throw new Error("archived boards keep their place");
+        const pos = Number(rest[0]); if (!(pos >= 1)) throw new Error("which position? (1 = top)");
+        const ids = orderItems(st.list.filter(it => !it.data.hidden), boardOrder()).map(it => it.id);
+        await saveOrder(moveId(ids, first, pos)); drawList(); return `move-board ${first} ${pos}`;
+      }
     }
     throw new Error("unknown command");
   }

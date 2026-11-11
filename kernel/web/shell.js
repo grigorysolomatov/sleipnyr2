@@ -283,7 +283,7 @@ async function boot() {
     // feature switches: Settings > Features (kernel settings item) over the app config; default on
     feature: name => (info.settings?.features?.[name] ?? info.app.features?.[name]) !== false,
     // the app settings changed by hand in Settings: {allowDelete, features}; kept fresh live
-    settings: () => info.settings || { allowDelete: false, features: {}, pickerHidden: null, viewNotes: {} },
+    settings: () => info.settings || { allowDelete: false, features: {}, pickerHidden: null, viewNotes: {}, itemOrder: {} },
     fileUrl: id => `/k/files/${encodeURIComponent(id)}`,
     address: id => `/i/${encodeURIComponent(id)}`,
     go: id => history.pushState({}, "", `/i/${encodeURIComponent(id)}`),

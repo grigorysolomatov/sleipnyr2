@@ -182,9 +182,12 @@ export async function createApp(config: Config) {
     const pickerHidden = Array.isArray(d.pickerHidden) ? d.pickerHidden : config.app.pickerHidden || [];
     const viewNotes: Record<string, string> = {};
     for (const [k, v] of Object.entries({ ...(config.app.viewNotes || {}), ...(d.viewNotes || {}) })) if (typeof v === "string" && v) viewNotes[k] = v;
-    return { allowDelete: d.allowDelete === true, features, pickerHidden, viewNotes };
+    const itemOrder: Record<string, string[]> = {};
+    for (const [k, v] of Object.entries(d.itemOrder || {})) if (Array.isArray(v)) itemOrder[k] = v.filter(x => typeof x === "string");
+    return { allowDelete: d.allowDelete === true, features, pickerHidden, viewNotes, itemOrder };
   };
-  const setSettings = (b: { allowDelete?: unknown; features?: unknown; pickerHidden?: unknown; viewNotes?: unknown }): AppSettings => {
+  const ORDER_MAX = 2000;
+  const setSettings = (b: { allowDelete?: unknown; features?: unknown; pickerHidden?: unknown; viewNotes?: unknown; itemOrder?: unknown }): AppSettings => {
     const patch: Record<string, unknown> = {};
     if (b.allowDelete !== undefined) {
       if (typeof b.allowDelete !== "boolean") throw Object.assign(new Error("allowDelete must be true or false"), { status: 400 });
@@ -218,7 +221,20 @@ export async function createApp(config: Config) {
       }
       patch.viewNotes = n;
     }
-    if (!Object.keys(patch).length) throw Object.assign(new Error("allowDelete, features, pickerHidden or viewNotes required"), { status: 400 });
+    if (b.itemOrder !== undefined) {
+      // {plugin: [item id, ...]} replaces that list's hand order, null = back to newest first
+      if (!b.itemOrder || typeof b.itemOrder !== "object" || Array.isArray(b.itemOrder)) throw Object.assign(new Error("itemOrder must be {list: [ids]|null}"), { status: 400 });
+      const o: Record<string, string[] | null> = { ...(settingsItem()?.data.itemOrder || {}) };
+      for (const [k, v] of Object.entries(b.itemOrder as Record<string, unknown>)) {
+        if (!/^[a-z][a-z0-9-]{0,40}$/.test(k)) throw Object.assign(new Error(`bad item order ${k}`), { status: 400 });
+        if (v === null) { delete o[k]; continue; }
+        if (!Array.isArray(v) || v.length > ORDER_MAX || v.some(x => typeof x !== "string" || !/^[A-Za-z0-9_-]{1,80}$/.test(x)))
+          throw Object.assign(new Error(`item order ${k} must be a list of item ids`), { status: 400 });
+        o[k] = [...new Set(v as string[])];
+      }
+      patch.itemOrder = o;
+    }
+    if (!Object.keys(patch).length) throw Object.assign(new Error("allowDelete, features, pickerHidden, viewNotes or itemOrder required"), { status: 400 });
     const cur = settingsItem();
     if (cur) kItems.update(cur.id, patch); else kItems.create(SETTINGS_TYPE, { allowDelete: false, features: {}, ...patch });
     return settings();

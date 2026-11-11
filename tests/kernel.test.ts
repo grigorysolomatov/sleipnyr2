@@ -127,6 +127,27 @@ test("settings: hidden agent notes per view type", async () => {
   expect((await call("PATCH", "/k/settings", { viewNotes: { blackboards: null } })).body.viewNotes).toEqual({});
 });
 
+test("settings: hand order of an item list", async () => {
+  expect((await call("GET", "/k/settings")).body.itemOrder).toEqual({});
+  expect((await call("PATCH", "/k/settings", { itemOrder: ["a"] })).status).toBe(400);
+  expect((await call("PATCH", "/k/settings", { itemOrder: { columns: "c_1" } })).status).toBe(400);
+  expect((await call("PATCH", "/k/settings", { itemOrder: { columns: ["bad id!"] } })).status).toBe(400);
+  expect((await call("PATCH", "/k/settings", { itemOrder: { columns: ["c_2", "c_1", "c_2"] } })).body.itemOrder).toEqual({ columns: ["c_2", "c_1"] });
+  expect((await call("GET", "/k/plugins")).body.settings.itemOrder.columns).toEqual(["c_2", "c_1"]);
+  expect((await call("PATCH", "/k/settings", { itemOrder: { columns: null } })).body.itemOrder).toEqual({});
+});
+
+test("itemList order helpers: unlisted items on top newest first, moveId clamps", async () => {
+  // @ts-ignore
+  const { orderItems, moveId } = await import("../kernel/web/itemlist.js");
+  const it = (id: string, updated: number) => ({ id, updated: String(updated), data: {} });
+  const got = orderItems([it("a", 1), it("b", 2), it("new1", 5), it("new2", 9), it("c", 3)], ["c", "a", "b", "gone"]);
+  expect(got.map((x: any) => x.id)).toEqual(["new2", "new1", "c", "a", "b"]);
+  expect(moveId(["a", "b", "c"], "c", 1)).toEqual(["c", "a", "b"]);
+  expect(moveId(["a", "b", "c"], "a", 99)).toEqual(["b", "c", "a"]);
+  expect(moveId(["a", "b", "c"], "b", 0)).toEqual(["b", "a", "c"]);
+});
+
 test("the old theme address still works", async () => {
   expect((await app.fetch(new Request("http://x/p/theme/theme.css"))).status).toBe(200);
   expect((await call("GET", "/p/theme/tokens")).status).toBe(200);
