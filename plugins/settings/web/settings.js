@@ -45,6 +45,7 @@ const FEATURES = [
   ["recent", "Recent conversations", "The modality list shows the latest conversations at the top"],
   ["panelDecisions", "Panel decisions", "Columns panels can carry Dismiss, Comment and Accept (off by default)"],
   ["recordingContext", "Recording context", "A voice message tells the agent what you looked at and tapped while recording"],
+  ["handsFree", "Hands-free talk", "The bar offers hands-free talk: speak, hear the reply, speak again"],
   ["notifications", "Notifications", "Phone notifications for agent replies, finished cards and things that need you"],
 ];
 const ROWS = GROUPS.flatMap(([, rows]) => rows);
