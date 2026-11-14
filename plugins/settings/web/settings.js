@@ -45,9 +45,11 @@ const FEATURES = [
   ["recent", "Recent conversations", "The modality list shows the latest conversations at the top"],
   ["panelDecisions", "Panel decisions", "Columns panels can carry Dismiss, Comment and Accept (off by default)"],
   ["recordingContext", "Recording context", "A voice message tells the agent what you looked at and tapped while recording"],
-  ["handsFree", "Hands-free talk", "The bar offers hands-free talk: speak, hear the reply, speak again"],
+  ["handsFree", "Hands-free talk", "The bar offers hands-free talk: speak, hear the reply, speak again (experimental, off by default)"],
   ["notifications", "Notifications", "Phone notifications for agent replies, finished cards and things that need you"],
 ];
+// switches that stay off until turned on
+const DEFAULT_OFF = new Set(["panelDecisions", "handsFree"]);
 const ROWS = GROUPS.flatMap(([, rows]) => rows);
 const SIZES = new Set(["radius", "font-size"]);
 const HEX = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
@@ -142,7 +144,7 @@ export function mount(box, ctx) {
   const notifRows = h("ul", { class: "tm-rows", role: "list" });
   const drawFeatureRows = () => {
     const rows = featureNames().map(([k, name, doc]) =>
-      [k, toggle(`feature.${k}`, name, doc, () => st.app.features?.[k] !== false, on => saveApp({ features: { [k]: on } }))]);
+      [k, toggle(`feature.${k}`, name, doc, () => (st.app.features?.[k] ?? !DEFAULT_OFF.has(k)) !== false, on => saveApp({ features: { [k]: on } }))]);
     featRows.replaceChildren(...rows.filter(([k]) => k !== "notifications").map(r => r[1]));
     notifRows.replaceChildren(...rows.filter(([k]) => k === "notifications").map(r => r[1]), pushRow);
   };

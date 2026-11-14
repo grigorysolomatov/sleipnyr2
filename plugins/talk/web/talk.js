@@ -123,8 +123,8 @@ export function extend(host, ctx) {
 
   // ------------------------------------------------------------ session
   let s = null; // the running conversation
-  // feature "handsFree" (Settings > Features, default on): off hides the button, live
-  const follow = () => { const on = ctx.feature ? ctx.feature("handsFree") : true; mod.el.hidden = !on; if (!on && s) stop(); };
+  // feature "handsFree" (Settings > Features, default OFF: still rough): off hides the button, live
+  const follow = () => { const on = (ctx.settings?.().features?.handsFree ?? ctx.app?.features?.handsFree) === true; mod.el.hidden = !on; if (!on && s) stop(); };
   queueMicrotask(follow); ctx.onSettings?.(follow);
   async function start() {
     if (s) return;
