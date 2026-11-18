@@ -205,7 +205,8 @@ export async function mount(root, ctx) {
   const title = h("h1", { class: "c-title", title: "Tap to rename", onclick: () => renameOpen() });
   const back = h("button", { class: "c-btn k-back c-back", type: "button", "data-tip": "Threads (Alt+T)", "aria-label": "Threads", onclick: () => showList() }, svg(BACK_SVG));
   const log = h("div", { class: "c-log", role: "log", "aria-live": "polite" });
-  const bar = h("header", { class: "c-bar" }, back, title);
+  const agentTag = h("small", { class: "c-agent-tag", "data-tip": "This thread's agent" });
+  const bar = h("header", { class: "c-bar" }, back, title, agentTag);
   // "Jump to latest": shows while the scroller is more than a screen above its end
   function jumper(scroller, endOf, host) {
     const btn = h("button", { class: "c-btn c-ic c-jump", type: "button", hidden: true, "data-tip": "Jump to latest", "aria-label": "Jump to latest",
@@ -293,6 +294,25 @@ export async function mount(root, ctx) {
     try { for (const a of await ctx.api(`${API}/agents`)) st.agentNames.set(a.id, a.name); } catch { /* names fall back to ids */ }
   }
 
+  // Several agents configured: an empty thread offers them (pink = this thread's);
+  // the first message fixes the choice, the thread bar then names the agent.
+  function agentPicker() {
+    const t = threadOf(st.open);
+    if (st.agentNames.size < 2 || !t || t.data.view) return null;
+    return h("div", { class: "c-agents", role: "radiogroup", "aria-label": "Agent for this thread" },
+      ...[...st.agentNames].map(([id, name]) => h("button", { class: "c-agent" + (id === t.data.agent ? " here" : ""), type: "button",
+        role: "radio", "aria-checked": String(id === t.data.agent), "data-id": id,
+        onclick: () => pickAgent(t.id, id) }, name)));
+  }
+  async function pickAgent(thread, agent) {
+    try { const t = await ctx.api(`${API}/threads/${encodeURIComponent(thread)}`, { method: "PATCH", json: { agent } }); onItem(t); }
+    catch (e) { say(`Could not switch agent: ${e.message}`, true); }
+  }
+  function drawAgentTag() {
+    const t = threadOf(st.open);
+    agentTag.textContent = st.agentNames.size > 1 && t ? st.agentNames.get(t.data.agent) || t.data.agent || "" : "";
+  }
+
   const threadOf = id => st.threads.find(x => x.id === id) || (st.hist?.id === id ? st.hist : null);
 
   function author(d) {
@@ -332,6 +352,7 @@ export async function mount(root, ctx) {
     if (push) ctx.go(id);
     const t = threadOf(id);
     title.textContent = t ? t.data.title : "";
+    drawAgentTag();
     if (t?.data.unread) markRead(id);
     shell.classList.add("thread-open");
     mb.focus("thread"); // opening a thread: the bar talks to it
@@ -379,6 +400,7 @@ export async function mount(root, ctx) {
     const olds = new Map([...log.querySelectorAll(".c-msg")].map(e => [e.id, e]));
     log.replaceChildren(...[...st.msgs.values()].filter(m => !heldBack(m)).map(m => { const el = messageEl(m); keepPlayers(olds.get(m.id), el); return el; }));
     if (!st.msgs.size) log.append(h("p", { class: "c-hello" }, st.open ? "New thread. Write, talk or paste a screenshot." : "Pick a thread or start a new one."));
+    if (!st.msgs.size && st.open) { const p = agentPicker(); if (p) log.append(p); }
     if (stick) log.scrollTop = logEnd();
     syncJump();
     for (const fn of drawHooks) try { fn(st.open); } catch (e) { console.error(e); }
@@ -556,7 +578,7 @@ export async function mount(root, ctx) {
         st.archived.sort((a, b) => b.updated - a.updated);
         drawThreads();
       }
-      if (item.id === st.open) { title.textContent = item.data.title; mb.refresh();
+      if (item.id === st.open) { title.textContent = item.data.title; drawAgentTag(); if (!st.msgs.size) drawLog(); mb.refresh();
         if (item.data.unread && shell.classList.contains("thread-open") && document.visibilityState === "visible") markRead(item.id); }
       if (st.hist?.id === item.id && !item.data.view) { st.hist = item; setStripName(); }
     } else if (item.type === "message") {

@@ -206,9 +206,24 @@ class Chat {
     return { ok: true, id: threadId, messages: msgs.length, files: files.size - kept, keptFiles: kept };
   }
 
-  change(threadId: string, b: { title?: unknown; hidden?: unknown; read?: unknown }) {
+  /** A configured agent id, else 400; empty = the default (chat.agent or the first agent). */
+  pickAgent(raw?: unknown) {
+    const ids = this.agent.agents().map(a => a.id);
+    const id = raw === undefined || raw === null || raw === "" ? String(this.k.config.agent || ids[0] || "") : String(raw);
+    if (ids.length && !ids.includes(id)) throw new HttpError(400, `unknown agent: ${id}`);
+    return id;
+  }
+
+  change(threadId: string, b: { title?: unknown; hidden?: unknown; read?: unknown; agent?: unknown }) {
     const t = this.k.items.get<Thread>(threadId);
     if (!t || t.type !== "thread") throw new HttpError(404, "no such thread");
+    // the agent is picked while the thread is empty; after the first message it stays
+    if (b.agent !== undefined) {
+      if (t.data.view) throw new HttpError(400, "a view's history thread keeps its agent");
+      if (this.messages(threadId).length) throw new HttpError(409, "this thread already talks to an agent; start a new thread");
+      this.k.items.update<Thread>(threadId, { agent: this.pickAgent(b.agent) });
+      if (b.title === undefined && b.hidden === undefined) return this.k.items.get<Thread>(threadId)!;
+    }
     if (b.read === true) { if (t.data.unread) this.k.items.update<Thread>(threadId, { unread: null }); if (b.title === undefined && b.hidden === undefined) return this.k.items.get<Thread>(threadId)!; }
     if (b.title === undefined && typeof b.hidden !== "boolean") throw new HttpError(400, "title or hidden required");
     if (b.title !== undefined) this.rename(threadId, b.title as string);
@@ -365,8 +380,8 @@ class Chat {
   }
   messages(thread: string) { return this.k.items.list<Message>({ type: "message", linkedTo: { rel: "in", to: thread }, order: "created" }); }
 
-  newThread(title = "New thread") {
-    const agent = String(this.k.config.agent || this.agent.agents()[0]?.id || "");
+  newThread(title = "New thread", agentId?: unknown) {
+    const agent = this.pickAgent(agentId);
     return this.k.items.create<Thread>("thread", { title, agent, state: {} });
   }
 
@@ -714,11 +729,11 @@ const plugin: ServerPlugin = {
       "GET /threads": req => Response.json(c().threads(new URL(req.url).searchParams.get("hidden") === "1")),
       "POST /views/:view/thread": (_req, p) => { try { return Response.json(c().viewThread(p.view)); } catch (e) { return bad(e); } },
       "POST /threads": async req => {
-        const b = await req.json().catch(() => ({})) as { title?: string };
-        return Response.json(c().newThread(b.title), { status: 201 });
+        const b = await req.json().catch(() => ({})) as { title?: string; agent?: string };
+        try { return Response.json(c().newThread(b.title, b.agent), { status: 201 }); } catch (e) { return bad(e); }
       },
       "PATCH /threads/:id": async (req, p) => {
-        const b = await req.json().catch(() => ({})) as { title?: string; hidden?: boolean; read?: boolean };
+        const b = await req.json().catch(() => ({})) as { title?: string; hidden?: boolean; read?: boolean; agent?: string };
         try { return Response.json(c().change(p.id, b)); } catch (e) { return bad(e); }
       },
       "DELETE /threads/:id": (_req, p) => {

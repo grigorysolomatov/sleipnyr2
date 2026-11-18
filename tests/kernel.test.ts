@@ -232,6 +232,16 @@ test("chat: a thread with no agent reports an error, not a hang", async () => {
   expect((await call("GET", `/k/items/${t.id}`)).body.data.title).toBe("hello there");
 });
 
+test("chat: the agent is picked while a thread is empty, then fixed", async () => {
+  const t = (await call("POST", "/p/chat/threads", {})).body;
+  expect(t.data.agent).toBe("stub");
+  const picked = await call("PATCH", `/p/chat/threads/${t.id}`, { agent: "other" });
+  expect(picked.status).toBe(200);
+  expect(picked.body.data.agent).toBe("other");
+  await call("POST", `/p/chat/threads/${t.id}/messages`, { text: "first" });
+  expect((await call("PATCH", `/p/chat/threads/${t.id}`, { agent: "stub" })).status).toBe(409);
+});
+
 test("chat notices: a local service starts a turn without a user message; same key = one post", async () => {
   const t = (await call("POST", "/p/chat/threads", {})).body;
   await call("PATCH", `/p/chat/threads/${t.id}`, { hidden: true });
