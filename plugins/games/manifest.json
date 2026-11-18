@@ -1,0 +1,27 @@
+{
+  "id": "games",
+  "name": "Games",
+  "version": "0.1.0",
+  "contract": 1,
+  "doc": "Games: a personal tabletop for game prototypes. Each game is an endless table you pan and zoom (phone and desktop) with pieces from reusable table components; the first is a 52-card poker set: drag, draw, merge, flip, shuffle and gather card stacks. The table is saved in the game; the agent can deal through the bar.",
+  "permissions": {
+    "read": [
+      "game"
+    ],
+    "write": [
+      "game"
+    ],
+    "network": []
+  },
+  "modality": {
+    "title": "Games",
+    "doc": "Tabletops for game prototypes: card decks you drag, flip and shuffle",
+    "icon": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"3\" y=\"5.5\" width=\"10\" height=\"14\" rx=\"1.6\" transform=\"rotate(-10 8 12.5)\"/><rect x=\"10.5\" y=\"4\" width=\"10\" height=\"14\" rx=\"1.6\"/><path d=\"M15.5 8.2s-2.6 2-2.6 3.6c0 .9.7 1.5 1.4 1.5.5 0 .9-.2 1.2-.5.3.3.7.5 1.2.5.7 0 1.4-.6 1.4-1.5 0-1.6-2.6-3.6-2.6-3.6zM15.5 13v1.6\"/></svg>"
+  },
+  "web": {
+    "entry": "web/games.js",
+    "styles": [
+      "web/games.css"
+    ]
+  }
+}

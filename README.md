@@ -237,6 +237,7 @@ agent's working state a spinner and words, errors a "!" and words).
 - `blackboards` - pannable, zoomable boards of windows into other views,
   notes and files.
 - `columns` - named columns of foldable panels, one per topic.
+- `games` - tabletops for game prototypes: pan and zoom a table of poker card stacks (drag, draw, merge, flip, shuffle, gather).
 - `projects` - a project list (config `plugins.projects.list`), each a
   dashboard page (trial).
 - `tinder` - the agent suggests tasks as a card stack; swipe right queues a

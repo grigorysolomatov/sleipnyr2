@@ -26,6 +26,7 @@
     },
     "blackboards": {},
     "columns": {},
+    "games": {},
     "projects": {
       "list": [
         { "id": "garden", "title": "Garden", "doc": "Beds, seeds, watering plan" },
