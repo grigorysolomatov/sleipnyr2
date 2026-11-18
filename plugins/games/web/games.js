@@ -6,8 +6,8 @@
 // arrow returns to the list. Each game has its own conversation (view thread
 // data.chatView = games-<id>; the list's is games-list).
 //
-// A game is an endless table: drag empty space (or one finger on a phone) to
-// pan, the wheel (or two fingers) to zoom. On it lie objects drawn by table
+// A game is an endless table: middle-drag (or one finger on a phone) pans,
+// a left drag on empty space draws a selection box; the wheel (or two fingers) to zoom. On it lie objects drawn by table
 // components (web/components/*.js): poker card sets, meeples and tiles.
 // The + at the top right (and a right-click / long-press on empty table)
 // offers them: Poker deck, Meeple, Tile. Tiles lie at the bottom, cards on
@@ -29,14 +29,23 @@
 //   one (tiles edge to edge), so C then V V V builds a row. The menus offer
 //   Copy (on a piece) and Paste (on empty table). The copy lives in this tab only.
 // several pieces (meeples and tiles; stacks never join):
-//   Shift+click or Ctrl/Cmd+click adds or removes a piece; Shift+drag on empty
-//   table draws a box that selects every piece it touches. With several
+//   Shift+click or Ctrl/Cmd+click adds or removes a piece; a left drag on empty
+//   table (Shift: added to the selection) draws a box that selects every piece it touches. With several
 //   selected, the menu of any of them colours, locks, duplicates or copies them
 //   all, and dragging one moves them all (locked tiles stay). Ctrl+V pastes the
 //   copied group in its layout: its top left at the pointer, or right beside
 //   the last paste. Phone: a piece's menu has Select more; taps then add or
 //   remove pieces until the Done (n) pill at the top; a long-press on a
 //   selected piece then acts on all of them.
+// delete + undo: Delete / Backspace (or Delete in a piece's menu) removes the
+//   selected meeples and tiles (a locked tile stays; cards are never removed,
+//   a set keeps its 52). Ctrl+Z undoes any table change (moves, colours, sizes,
+//   locks, pastes, deletes, card draws, flips, shuffles, merges, gathers),
+//   Ctrl+Shift+Z or Ctrl+Y redoes; the history is per game, in this tab.
+// desktop keys (? shows them): Ctrl+D duplicate, Ctrl+A select all pieces,
+//   arrows nudge 10 px (Shift: 50), L lock / unlock tiles; over a stack under
+//   the mouse: F flip, S shuffle, D draw, G gather. Keys are ignored while
+//   typing in a field.
 //
 // Saved item (kernel /k/items), one per game:
 //   game {title, chatView, sets: [{id, kind, x, y}], objects: [{id, kind, x, y, ...}]}
@@ -52,6 +61,7 @@ import * as Cards from "./components/cards.js";
 import * as Meeples from "./components/meeples.js";
 import * as Tiles from "./components/tiles.js";
 import { PALETTE, colorName, parseColor, setColor } from "./components/colors.js";
+import * as Table from "./components/table.js";
 
 // the table components by object kind: element class, drawing, size, layer (higher = on top)
 const KINDS = {
@@ -88,6 +98,8 @@ const icon = (ic, tip, onclick, cls = "") => h("button", { class: `c-btn c-ic ${
 // the copied pieces {items: [{kind, color, w, h, dx, dy}], w, h}: dx, dy from
 // the group's top left, w x h its size; per tab, shared by every game
 let CLIP = null;
+// undo histories by game id (this tab)
+const HIST = new Map();
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const ease = t => 1 - Math.pow(1 - t, 3);
 
@@ -107,7 +119,7 @@ export function mount(box, ctx) {
   const plane = h("div", { class: "gm-plane" });
   const hint = h("p", { class: "gm-hint", hidden: true }, "Empty table. Use + above, or right-click / long-press the table, to add a poker deck, a meeple or a tile.");
   const board = h("div", { class: "gm-board", hidden: true, "data-k-id": "table", "data-k-kind": "table",
-    "data-k-label": "The table: drag empty space to pan, wheel or pinch to zoom" }, dots, plane, hint);
+    "data-k-label": "The table: middle-drag (phone: one finger) pans, left-drag selects, wheel or pinch zooms" }, dots, plane, hint);
   const menu = h("div", { class: "gm-menu k-pop", role: "menu", hidden: true });
   const note = h("p", { class: "gm-note", "aria-live": "polite", hidden: true });
   // the Custom colour picker: the browser's own, opened from the menu
@@ -118,7 +130,9 @@ export function mount(box, ctx) {
   // Shift+drag on empty table: the selection box
   const boxEl = h("div", { class: "gm-box", hidden: true, "aria-hidden": "true" });
   board.append(boxEl);
-  box.append(head, games.el, board, note, menu, picker, done);
+  // ? : the desktop keys
+  const keysEl = h("div", { class: "gm-keys k-pop", role: "dialog", "aria-label": "Keys", hidden: true });
+  box.append(head, games.el, board, note, menu, picker, done, keysEl);
   const say = (t, err = false) => { note.hidden = !t; note.textContent = t || ""; note.classList.toggle("err", err); };
 
   // ------------------------------------------------------------ data
@@ -128,7 +142,19 @@ export function mount(box, ctx) {
   const needO = id => { const o = findO(String(id || "").trim()); if (!o) throw new Error(`no object ${id}`); return o; };
   const table = () => ({ sets: data().sets || [], objects: objs() });
   /** apply a pure table operation's result and save */
-  function commit(state) { data().sets = state.sets; data().objects = state.objects; draw(); save(); }
+  function commit(state, tag = "") { data().sets = state.sets; data().objects = state.objects; draw(); save(false, tag); }
+  // ---- undo: every save records the table; undo / redo put an older one back
+  const snapshot = () => JSON.stringify({ sets: data()?.sets || [], objects: objs() });
+  const hist = () => { const id = st.item?.id; if (!id) return null; if (!HIST.has(id)) HIST.set(id, Table.history()); return HIST.get(id); };
+  function undoRedo(redo) {
+    const H = hist(); if (!H || drag || boxSel) return false;
+    const s = redo ? H.redo(snapshot()) : H.undo(snapshot());
+    if (s == null) { say(redo ? "Nothing to redo." : "Nothing to undo."); clearTimeout(st.undoT); st.undoT = setTimeout(() => { if (/^Nothing to/.test(note.textContent)) say(""); }, 1800); return false; }
+    const was = spots(), t = JSON.parse(s);
+    closeMenu(); data().sets = t.sets; data().objects = t.objects; draw(); glideFrom(was); save();
+    if (/^Nothing to|^Removed|^Locked tiles/.test(note.textContent)) say("");
+    return true;
+  }
   const gameSummary = it => {
     const all = it.data.objects || [], os = all.filter(o => o.kind === Cards.KIND), n = os.reduce((s, o) => s + o.cards.length, 0);
     const pl = (k, w) => `${k} ${w}${k === 1 ? "" : "s"}`, parts = [];
@@ -145,9 +171,10 @@ export function mount(box, ctx) {
     if (st.item === it) { st.savedAt = Math.max(st.savedAt, Number(out.updated) || 0); it.updated = out.updated; }
   }
   let saving = null, inFlight = 0;
-  function save(now = false) {
+  function save(now = false, tag = "") {
     clearTimeout(st.saveTimer);
     if (!st.item) return Promise.resolve(true);
+    hist()?.record(snapshot(), tag);
     const go = () => { st.saveTimer = 0; return (saving = (async () => {
       await saving?.catch(() => {});
       inFlight++;
@@ -414,16 +441,43 @@ export function mount(box, ctx) {
     commit(state); made.forEach(id => pulse(id, "gm-land")); setSel(made);
     return made;
   }
-  function doColorMany(ids, c) {
+  function doColorMany(ids, c, tag = "") {
     const v = parseColor(c); if (!v) throw new Error(`not a colour: ${c}`);
     let state = table();
     for (const id of ids) if (selectable(findO(id))) state = setColor(state, id, v);
-    commit(state);
+    commit(state, tag);
   }
   function doLockMany(ids, on) {
     let state = table();
     for (const id of ids) if (findO(id)?.kind === Tiles.KIND) state = Tiles.setLocked(state, id, on);
     commit(state);
+  }
+  /** remove the selected meeples and tiles (locked tiles stay, cards never go) */
+  function doDelete(ids) {
+    const os = ids.map(findO).filter(selectable), gone = os.filter(Table.removable), kept = os.length - gone.length;
+    if (!gone.length) { if (kept) say("Locked tiles stay: unlock them first (L)."); return 0; }
+    commit(Table.removePieces(table(), gone.map(o => o.id)));
+    const pl = (k, w) => `${k} ${w}${k === 1 ? "" : "s"}`;
+    say(`Removed ${pl(gone.length, "piece")}${kept ? `; ${pl(kept, "locked tile")} kept` : ""}. Ctrl+Z brings ${gone.length === 1 ? "it" : "them"} back.`);
+    clearTimeout(st.delT); st.delT = setTimeout(() => { if (note.textContent.startsWith("Removed")) say(""); }, 3000);
+    return gone.length;
+  }
+  /** move the selected pieces by dx, dy (locked tiles stay; tiles keep to the grid) */
+  function doNudge(ids, dx, dy) {
+    let n = 0;
+    for (const id of ids) {
+      const o = findO(id); if (!selectable(o) || (o.kind === Tiles.KIND && o.locked)) continue;
+      o.x = o.kind === Tiles.KIND ? Tiles.snap(o.x + dx) : Math.round(o.x + dx);
+      o.y = o.kind === Tiles.KIND ? Tiles.snap(o.y + dy) : Math.round(o.y + dy); n++;
+    }
+    if (n) { draw(); save(false, "nudge"); }
+    return n;
+  }
+  /** L: lock the selected tiles, or unlock them when all are locked */
+  function toggleLock(ids) {
+    const ts = ids.map(findO).filter(o => o?.kind === Tiles.KIND); if (!ts.length) return false;
+    doLockMany(ts.map(o => o.id), !ts.every(o => o.locked));
+    return true;
   }
   /** copies of the pieces directly to the right of them, the layout kept */
   function doDuplicateMany(ids) {
@@ -542,10 +596,10 @@ export function mount(box, ctx) {
   function stackMenu(id, cx, cy) {
     const o = findO(id); if (!o) return;
     const n = o.cards.length, t = Cards.topCard(o);
-    const items = [[n > 1 ? "Flip stack" : "Flip", n > 1 ? "Turn the whole stack over (its order reverses)" : "Turn the card over", () => doFlip(id)]];
-    if (n > 1) items.push(["Draw", "Put the top card face up beside the deck", () => doDraw(id)]);
-    if (n > 1) items.push(["Shuffle", "Shuffle this stack", () => doShuffle(id)]);
-    items.push(["Gather", `Every card of this deck back here: one full ordered deck, face down`, () => doGather(o.set)]);
+    const items = [[n > 1 ? "Flip stack" : "Flip", n > 1 ? "Turn the whole stack over (its order reverses)  (F)" : "Turn the card over  (F)", () => doFlip(id)]];
+    if (n > 1) items.push(["Draw", "Put the top card face up beside the deck  (D)", () => doDraw(id)]);
+    if (n > 1) items.push(["Shuffle", "Shuffle this stack  (S)", () => doShuffle(id)]);
+    items.push(["Gather", `Every card of this deck back here: one full ordered deck, face down  (G)`, () => doGather(o.set)]);
     openMenu(cx, cy, items, n > 1 ? `${n} cards` : t.up ? Cards.cardLong(t.c) : "Card, face down");
   }
   /** what can be added: at a table point, or (no point) the middle of the screen */
@@ -558,7 +612,22 @@ export function mount(box, ctx) {
     const p = tablePt(cx, cy);
     const paste = !CLIP ? [] : [["Paste", CLIP.items.length > 1 ? `The ${CLIP.items.length} copied pieces, their top left here`
       : `Another ${CLIP.items[0].kind === Tiles.KIND ? "tile" : "meeple"} like the copied one, here`, () => doPaste(p)]];
-    openMenu(cx, cy, [...paste, ...addItems(p)], "Add to the table");
+    const H = hist(), back = [
+      ...(H?.canUndo() ? [["Undo", "Take back the last change on the table  (Ctrl+Z)", () => undoRedo(false)]] : []),
+      ...(H?.canRedo() ? [["Redo", "Do the undone change again  (Ctrl+Shift+Z)", () => undoRedo(true)]] : []),
+      ...(lastType === "mouse" ? [["Keys…", "The keyboard shortcuts  (?)", () => showKeys(true)]] : [])];
+    openMenu(cx, cy, [...paste, ...addItems(p), ...back], "Add to the table");
+  }
+  // ---- the keys sheet (?)
+  const KEYS = [["Del / Backspace", "remove the selected pieces"], ["Ctrl+Z", "undo"], ["Ctrl+Shift+Z, Ctrl+Y", "redo"],
+    ["Ctrl+C / Ctrl+V", "copy / paste pieces"], ["Ctrl+D", "duplicate the selection"], ["Ctrl+A", "select all pieces"],
+    ["Esc", "clear the selection"], ["Arrows", "nudge 10 px (Shift: 50 px)"], ["L", "lock / unlock the selected tiles"],
+    ["F / S / D / G", "over a stack: flip, shuffle, draw, gather"], ["Shift+click", "add or remove a piece (also Ctrl+click)"],
+    ["Left drag", "select with a box"], ["Middle drag", "pan"], ["Wheel", "zoom"], ["?", "this sheet"]];
+  function showKeys(on) {
+    keysEl.hidden = !on; if (!on) return;
+    keysEl.replaceChildren(h("div", { class: "gm-menu-h" }, "Keys"),
+      h("dl", { class: "gm-keyl" }, KEYS.flatMap(([k, d]) => [h("dt", {}, ...k.split(/(\s*[\/,+]\s*)/).map((x, i) => (i % 2 ? x : h("kbd", {}, x)))), h("dd", {}, d)])));
   }
   /** the + at the top right: the same choices, under the button */
   function addMenu() {
@@ -577,38 +646,42 @@ export function mount(box, ctx) {
       const r = box.getBoundingClientRect();
       picker.style.left = `${clamp(cx - r.left, 0, r.width - 2)}px`; picker.style.top = `${clamp(cy - r.top, 0, r.height - 2)}px`;
       picker.value = o.color;
-      picker.oninput = () => { try { doColorMany(ids, picker.value); } catch (e) { say(e.message, true); } };
+      picker.oninput = () => { try { doColorMany(ids, picker.value, "picker"); } catch (e) { say(e.message, true); } };
       picker.onchange = picker.oninput;
       picker.click();
     };
     return [row, ["Custom colour…", "Any colour, from the colour picker", custom]];
   }
   function meepleMenu(o, cx, cy) {
-    openMenu(cx, cy, [...colorItems(o, cx, cy), ["Duplicate", "Another meeple of this colour beside it", () => doDuplicate(o.id)],
-      ["Copy", "Copy it; paste copies with Ctrl+V or from the table's menu", () => doCopy(o.id)], ...more(o)], `${colorName(o.color)} meeple`);
+    openMenu(cx, cy, [...colorItems(o, cx, cy), ["Duplicate", "Another meeple of this colour beside it  (Ctrl+D)", () => doDuplicate(o.id)],
+      ["Copy", "Copy it; paste copies with Ctrl+V or from the table's menu  (Ctrl+C)", () => doCopy(o.id)],
+      ["Delete", "Remove it; Undo brings it back  (Del, Ctrl+Z)", () => doDelete([o.id])], ...more(o)], `${colorName(o.color)} meeple`);
   }
   /** phone: Select more (desktop has Shift / Ctrl + click) */
   const more = o => (lastType === "mouse" || st.multi ? [] : [["Select more", "Tap more pieces to add them; Done ends", () => startMulti(o.id)]]);
   function tileMenu(o, cx, cy) {
     openMenu(cx, cy, [...colorItems(o, cx, cy),
-      ["Duplicate", "A copy directly to its right, same size and colour", () => doDuplicate(o.id)],
-      ["Copy", "Copy it; paste copies with Ctrl+V or from the table's menu", () => doCopy(o.id)],
-      o.locked ? ["Unlock", "Let the tile move and resize again", () => doLock(o.id, false)]
-        : ["Lock", "Keep it in place: drags on it pan the table", () => doLock(o.id, true)], ...more(o)],
+      ["Duplicate", "A copy directly to its right, same size and colour  (Ctrl+D)", () => doDuplicate(o.id)],
+      ["Copy", "Copy it; paste copies with Ctrl+V or from the table's menu  (Ctrl+C)", () => doCopy(o.id)],
+      o.locked ? ["Unlock", "Let the tile move and resize again  (L)", () => doLock(o.id, false)]
+        : ["Lock", "Keep it in place: drags on it pan the table  (L)", () => doLock(o.id, true)],
+      ...(o.locked ? [] : [["Delete", "Remove it; Undo brings it back  (Del, Ctrl+Z)", () => doDelete([o.id])]]), ...more(o)],
       `${colorName(o.color)} tile, ${o.w} x ${o.h}${o.locked ? ", locked" : ""}`);
   }
   /** several selected: the menu acts on all of them */
   function groupMenu(o, cx, cy) {
     const os = group(), ids = os.map(q => q.id), tiles = os.filter(q => q.kind === Tiles.KIND), n = os.length;
     const nm = tiles.length, nmp = n - nm, pl = (k, w) => `${k} ${w}${k === 1 ? "" : "s"}`;
-    const lockAll = tiles.length && tiles.every(q => q.locked) ? ["Unlock all", "Let the selected tiles move and resize again", () => doLockMany(ids, false)]
-      : ["Lock all", "Keep the selected tiles in place", () => doLockMany(ids, true)];
+    const lockAll = tiles.length && tiles.every(q => q.locked) ? ["Unlock all", "Let the selected tiles move and resize again  (L)", () => doLockMany(ids, false)]
+      : ["Lock all", "Keep the selected tiles in place  (L)", () => doLockMany(ids, true)];
+    const nDel = os.filter(Table.removable).length;
     openMenu(cx, cy, [...colorItems(o, cx, cy, ids),
-      ["Duplicate", `Copies of all ${n} directly to the right of them, in the same layout`, () => doDuplicateMany(ids)],
-      ["Copy", "Copy them; Ctrl+V or the table's menu pastes the group", () => doCopy(ids)],
+      ["Duplicate", `Copies of all ${n} directly to the right of them, in the same layout  (Ctrl+D)`, () => doDuplicateMany(ids)],
+      ["Copy", "Copy them; Ctrl+V or the table's menu pastes the group  (Ctrl+C)", () => doCopy(ids)],
       ...(tiles.length ? [lockAll] : []),
+      ...(nDel ? [[nDel === n ? "Delete" : `Delete ${nDel}`, `Remove ${nDel === n ? "them" : `the ${nDel} not locked`}; Undo brings them back  (Del, Ctrl+Z)`, () => doDelete(ids)]] : []),
       ...(lastType !== "mouse" && !st.multi ? [["Select more", "Tap more pieces to add or remove them; Done ends", () => startMulti(o.id)]] : []),
-      ["Clear selection", "Unselect all", () => { endMulti(); select(""); }]],
+      ["Clear selection", "Unselect all  (Esc)", () => { endMulti(); select(""); }]],
       `${n} selected: ${[nm ? pl(nm, "tile") : "", nmp ? pl(nmp, "meeple") : ""].filter(Boolean).join(", ")}`);
   }
   function objMenu(id, cx, cy) {
@@ -621,18 +694,43 @@ export function mount(box, ctx) {
   document.addEventListener("pointerdown", e => { if (!menu.hidden && !menu.contains(e.target)) closeMenu(); }, true);
   document.addEventListener("keydown", e => { if (e.key === "Escape" && !menu.hidden) { closeMenu(); e.stopPropagation(); } }, true);
   const typing = t => !!t?.closest?.("input, textarea, select, [contenteditable]:not([contenteditable=false])");
+  document.addEventListener("pointerdown", e => { if (!keysEl.hidden && !keysEl.contains(e.target)) showKeys(false); }, true);
+  /** the stack under the mouse, for F / S / D / G */
+  const hoverStack = () => (pst.ptr ? hitStack(tablePt(pst.ptr.cx, pst.ptr.cy)) : null);
   document.addEventListener("keydown", e => {
     if (!st.item || board.hidden || !board.getClientRects().length || ctx.levels.current() !== ME) return;
-    if (typing(e.target) || typing(document.activeElement)) return; // the chat field keeps its copy + paste
-    if (e.key === "Escape" && menu.hidden && (st.sel.size || st.multi)) { endMulti(); select(""); return; }
-    if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
-    const k = e.key.toLowerCase();
-    if (k === "c") {
-      if (String(window.getSelection?.() || "")) return; // selected page text copies as usual
-      if (st.sel.size && doCopy([...st.sel])) e.preventDefault();
-    } else if (k === "v" && CLIP) {
-      e.preventDefault();
-      try { doPaste(); } catch (err) { say(err.message, true); }
+    if (typing(e.target) || typing(document.activeElement)) return; // the chat field keeps its keys
+    if (drag || boxSel) return;
+    const k = e.key.length === 1 ? e.key.toLowerCase() : e.key, cmd = e.ctrlKey || e.metaKey, sel = [...st.sel];
+    const act = fn => { e.preventDefault(); try { fn(); } catch (err) { say(err.message, true); } };
+    if (k === "Escape") {
+      if (!keysEl.hidden) { showKeys(false); return; }
+      if (menu.hidden && (st.sel.size || st.multi)) { endMulti(); select(""); }
+      return;
+    }
+    if (e.altKey) return;
+    if (cmd) {
+      if (k === "z") return act(() => undoRedo(e.shiftKey));
+      if (k === "y" && !e.shiftKey) return act(() => undoRedo(true));
+      if (e.shiftKey) return;
+      if (k === "c") {
+        if (String(window.getSelection?.() || "")) return; // selected page text copies as usual
+        if (st.sel.size && doCopy(sel)) e.preventDefault();
+      } else if (k === "v" && CLIP) act(() => doPaste());
+      else if (k === "d") act(() => { if (sel.length) doDuplicateMany(sel); });
+      else if (k === "a") act(() => setSel(objs().filter(selectable).map(o => o.id)));
+      return;
+    }
+    if (k === "?") return act(() => showKeys(keysEl.hidden));
+    if (k === "Delete" || k === "Backspace") { if (sel.length) act(() => doDelete(sel)); return; }
+    const arrows = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+    if (arrows[k]) { if (sel.length) { const n = e.shiftKey ? 50 : 10; act(() => doNudge(sel, arrows[k][0] * n, arrows[k][1] * n)); } return; }
+    if (e.shiftKey) return;
+    if (k === "l") { if (sel.length) act(() => toggleLock(sel)); return; }
+    if ("fsdg".includes(k) && k.length === 1) {
+      const o = hoverStack(); if (!o) return;
+      act(() => { closeMenu(); if (k === "f") doFlip(o.id); else if (k === "s") doShuffle(o.id); else if (k === "g") doGather(o.set);
+        else if (o.cards.length > 1) doDraw(o.id); });
     }
   });
 
@@ -669,9 +767,11 @@ export function mount(box, ctx) {
     // a locked tile passes the press through to the table (pan), keeping only its menu;
     // while selecting (modifier, phone select mode) it can be picked
     const through = locked && !mod && !st.multi ? hit : null;
-    if (!hit && mod && !mid && !drag && !pans.size) {
+    // desktop: a left drag on empty table (or a locked tile) draws the selection box;
+    // the middle button pans; Shift / Ctrl / Cmd add to the selection
+    if ((!hit || through) && e.pointerType === "mouse" && !mid && !drag && !pans.size) {
       board.setPointerCapture(e.pointerId);
-      boxSel = { pid: e.pointerId, sx: e.clientX, sy: e.clientY, base: new Set(st.sel), moved: false };
+      boxSel = { pid: e.pointerId, sx: e.clientX, sy: e.clientY, base: new Set(mod ? st.sel : []), moved: false, mod };
       e.preventDefault();
       return;
     }
@@ -828,7 +928,7 @@ export function mount(box, ctx) {
     if (pans.size === 1) { const [q] = pans.values(); q.sx = q.x; q.sy = q.y; }
     if (!pans.size) { board.classList.remove("panning"); moving(); }
   }
-  function endBox(e) { if (e && e.pointerId !== boxSel.pid) return false; boxSel = null; boxEl.hidden = true; return true; }
+  function endBox(e) { if (e && e.pointerId !== boxSel.pid) return false; if (!boxSel.moved && !boxSel.mod && !st.multi) select(""); boxSel = null; boxEl.hidden = true; return true; }
   board.addEventListener("pointerup", e => { if (boxSel && endBox(e)) return; if (drag && e.pointerId === drag.pid) endDrag(e); else endPan(e); });
   board.addEventListener("pointercancel", e => { if (boxSel && endBox(e)) return; if (drag && e.pointerId === drag.pid) endDrag(e, true); else endPan(e); });
   board.addEventListener("contextmenu", e => {
@@ -969,6 +1069,7 @@ export function mount(box, ctx) {
       st.item = { ...it, data: { sets: [], objects: [], ...it.data } }; st.savedAt = Number(it.updated) || 0;
       try { st.view = { x: 40, y: 40, z: 1, ...JSON.parse(localStorage.getItem(VIEW_KEY + it.id) || "{}") }; } catch { st.view = { x: 40, y: 40, z: 1 }; }
     }
+    hist()?.reset(snapshot()); // the opened table is what undo starts from
     st.last = it.id; localStorage.setItem(LAST_KEY, it.id);
     drawHead(); games.el.hidden = true; board.hidden = false;
     embed(viewName(st.item), `${st.item.data.title || "Game"} conversation`);
@@ -979,7 +1080,7 @@ export function mount(box, ctx) {
   function clearTable() {
     clearTimeout(st.saveTimer); st.saveTimer = 0;
     st.els.forEach(el => el.remove()); st.els.clear();
-    st.item = null; st.sel = new Set(); st.multi = false; drawDone(); boxSel = null; boxEl.hidden = true; drag = null; pans.clear(); pinch = null;
+    st.item = null; st.sel = new Set(); st.multi = false; drawDone(); showKeys(false); boxSel = null; boxEl.hidden = true; drag = null; pans.clear(); pinch = null;
   }
   ctx.actions?.view?.(ME, {
     scrollTo: id => { const o = st.item && findO(id); if (!o) return false; centreOn(o); return true; },
@@ -997,6 +1098,7 @@ export function mount(box, ctx) {
       const was = spots();
       st.item = { ...item, data: { sets: [], objects: [], ...item.data } };
       drawHead(); draw(); glideFrom(was);
+      hist()?.reset(snapshot()); // not a step of ours: undo goes back from here
     }
   });
 }

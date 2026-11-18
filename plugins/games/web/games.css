@@ -133,3 +133,9 @@
 
 /* the menu at an object (right-click / long-press): the shared .k-pop look */
 .gm-menu-h { margin: .35rem .7rem .2rem; color: var(--text-muted); font-size: .8em; }
+/* ? : the desktop keys sheet, top right of the game */
+.gm-keys { position: absolute; right: .75rem; top: 3.2rem; z-index: 6; padding-bottom: .5rem; max-height: calc(100% - 4rem); overflow: auto; display: block; max-width: calc(100vw - 1.5rem); width: 30rem; }
+.gm-keyl { display: grid; grid-template-columns: max-content 1fr; gap: .3rem .9rem; margin: .3rem .8rem 0; font-size: .85em; }
+.gm-keyl dt { white-space: nowrap; color: var(--text-muted); }
+.gm-keyl dd { margin: 0; }
+.gm-keyl kbd { font: inherit; color: var(--text); border: 1px solid var(--line); border-radius: 4px; padding: 0 .3rem; }
