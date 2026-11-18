@@ -94,6 +94,14 @@
 .gm-tile.gm-drag { cursor: grabbing; will-change: transform; }
 .gm-tile.gm-sel { outline: 2px solid var(--accent-here); outline-offset: -2px; }
 .gm-meeple.gm-sel { outline: 2px solid var(--accent-here); outline-offset: 2px; border-radius: 6px; }
+/* Shift + drag on empty table: the selection box */
+.gm-box { position: absolute; pointer-events: none; border: 1px dashed var(--accent-here); background: color-mix(in srgb, var(--accent-here) 10%, transparent); }
+/* phone select mode: ends selecting, shows how many are selected */
+.gm-done {
+  position: absolute; left: 50%; transform: translateX(-50%); z-index: 4;
+  background: var(--bg); color: var(--text); border: 1px solid var(--accent-here); border-radius: 999px;
+  font: inherit; font-size: .9em; padding: .35rem 1rem; cursor: pointer; font-variant-numeric: tabular-nums;
+}
 .gm-meeple.gm-copied, .gm-tile.gm-copied { animation: gm-copied 360ms var(--gm-ease); }
 @keyframes gm-copied { 50% { opacity: .55; } }
 .gm-tile.gm-locked { cursor: inherit; }
@@ -102,6 +110,7 @@
   background: linear-gradient(135deg, transparent 50%, var(--accent-here) 50%);
 }
 .gm-tile.gm-sel:not(.gm-locked) .gm-handle { display: block; }
+.gm-board.gm-many .gm-tile.gm-sel .gm-handle { display: none; }
 @media (hover: hover) { .gm-tile:not(.gm-locked):hover .gm-handle { display: block; } }
 .gm-meeple.glide, .gm-tile.glide { transition: transform var(--gm-glide) var(--gm-ease); }
 .gm-meeple.gm-land, .gm-tile.gm-land { animation: gm-land 380ms var(--gm-ease); }
