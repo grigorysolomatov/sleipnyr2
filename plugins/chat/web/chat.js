@@ -40,6 +40,7 @@ const h = (tag, attrs = {}, ...kids) => {
   return el;
 };
 
+const LATE_MS = 2 * 60e3; // a message that reached the server later than this after it was made shows both times
 const when = t => {
   const d = new Date(t), now = new Date();
   return d.toDateString() === now.toDateString()
@@ -186,9 +187,10 @@ export async function mount(root, ctx) {
   const stripName = h("b", {}, "Thread list conversation");
   const stripHead = h("div", { class: "c-strip-head", "data-tip": "Embedded chat: drag to resize, tap to fold or unfold" },
     h("span", { class: "c-strip-grip", "aria-hidden": "true" }), fold,
-    stripName, tmBtn,
+    stripName,
     h("button", { class: "c-btn c-ic", type: "button", "data-tip": "Open as a full thread", "aria-label": "Open as a full thread",
-      onclick: () => { if (st.hist) openThread(st.hist.id, true); } }, svg(FULL)));
+      onclick: () => { if (st.hist) openThread(st.hist.id, true); } }, svg(FULL)),
+    tmBtn);
   // stop: only while a turn of this conversation runs or waits (the running one stops first)
   const stripStop = h("button", { class: "c-btn c-ic c-stop", type: "button", hidden: true, "data-tip": `Stop ${agentName}`, "aria-label": `Stop ${agentName}`,
     onclick: () => { if (st.hist) stopTurn(st.hist.id); } }, svg(STOP));
@@ -379,7 +381,10 @@ export async function mount(root, ctx) {
   // (transform) and would count as scroll space; scrolling to scrollHeight
   // then follows it down and cancels the rise.
   function logEnd() {
-    const last = log.lastElementChild;
+    // skip hidden children: a reply waiting its turn (display:none) has
+    // offsetTop 0 and would aim the scroll at the top of the log
+    let last = log.lastElementChild;
+    while (last && !last.offsetParent) last = last.previousElementSibling;
     if (!last) return 0;
     const end = last.offsetTop - log.offsetTop + last.offsetHeight + parseFloat(getComputedStyle(log).paddingBottom);
     return Math.max(0, Math.min(log.scrollHeight, end) - log.clientHeight);
@@ -426,8 +431,12 @@ export async function mount(root, ctx) {
   function messageEl(m) {
     const d = m.data, live = st.live.get(m.id);
     const el = h("article", { class: `c-msg ${d.role}${d.notice ? " notice" : ""}`, id: m.id, "data-id": m.id, "data-k-id": m.id, "data-k-kind": `${d.role} message` });
+    // a message that waited in a device's outbox (connection down) says so: recorded then, delivered now
+    const late = d.recordedAt && Number(m.created) - Number(d.recordedAt) > LATE_MS;
     el.append(h("header", { class: "c-who" }, h("b", {}, author(d)), h("time", {}, when(m.created)),
-      d.from ? h("small", { class: "c-from", "data-tip": "Sent with what that view showed" }, `from the ${d.from}`) : null));
+      d.from ? h("small", { class: "c-from", "data-tip": "Sent with what that view showed" }, `from the ${d.from}`) : null,
+      late ? h("small", { class: "c-late", "data-tip": "It waited on the device until the connection came back" },
+        `recorded ${when(Number(d.recordedAt))}, delivered ${when(Number(m.created))}`) : null));
     for (const f of d.files || []) el.append(fileEl(f));
     if (d.voice) {
       el.append(voiceEl(ctx.fileUrl(d.voice)));
@@ -446,12 +455,18 @@ export async function mount(root, ctx) {
     if (working) {
       const what = d.status === "transcribing" ? "transcribing…" : live?.progress || (d.status === "queued" ? "waiting…" : "working…");
       el.append(h("p", { class: "c-working", role: "status" }, h("span", { class: "c-spin", "aria-hidden": "true" }), stepEl(m.id, what), h("span", { class: "c-el", "data-t": m.created }, elapsed(m.created)),
-        h("button", { class: "c-btn c-ic c-stop", type: "button", "data-tip": `Stop ${agentName}`, "aria-label": `Stop ${agentName}`, onclick: () => stopTurn(d.thread, m.id) }, svg(STOP))));
+        d.replyStopped ? null : h("button", { class: "c-btn c-ic c-stop", type: "button", "data-tip": `Stop ${agentName}`, "aria-label": `Stop ${agentName}`, onclick: () => stopTurn(d.thread, m.id) }, svg(STOP))));
     }
     if (d.status === "error") el.append(h("p", { class: "c-error", role: "alert" }, h("b", {}, "! "), d.error || "failed"));
     // stopped by the user: quiet notes, never an error
     if (d.status === "stopped" && !d.skipped) el.append(h("p", { class: "c-quiet" }, "stopped"));
-    if (d.status === "cancelled") el.append(h("p", { class: "c-quiet" }, "cancelled, not sent"));
+    // a stopped reply never drops the message: it stays, with a one-tap "send again"
+    if (d.role === "user" && (d.status === "cancelled" || d.replyStopped || (d.status === "error" && d.voice))) {
+      const why = d.status === "cancelled" ? `not sent to ${agentName}` : d.status === "error" ? "not sent" : "sent, reply stopped";
+      el.append(h("p", { class: "c-quiet c-again-row" }, d.resent ? `${why}; sent again` : why,
+        d.resent ? null : h("button", { class: "c-btn c-again", type: "button", "data-tip": `Send this message to ${agentName} again`,
+          onclick: e => sendAgain(d.thread, m.id, e.currentTarget) }, "Send again")));
+    }
     if (d.role === "user" && d.steered) el.append(h("p", { class: "c-quiet" }, "added to the answer already running"));
     if (d.role === "agent" && (d.skipped || d.steered)) el.hidden = true; // no reply of its own
     if (d.calls?.length) el.append(h("ul", { class: "c-calls", "data-tip": "What the agent did on screen (declared actions)" },
@@ -557,9 +572,11 @@ export async function mount(root, ctx) {
     keepPlayers(old, el);
     if (old) old.replaceWith(el);
     else { log.querySelector(".c-hello")?.remove(); log.append(el); }
-    if (grow) grow(stick);
+    // a message that is already there (streaming, step text, status) never
+    // moves the scroll: only a new message follows the bottom
+    if (grow) grow(false);
     if (lift) liftIn(el, before);
-    else if (stick) log.scrollTo({ top: logEnd(), behavior: st.animate && !old ? "smooth" : "auto" });
+    else if (stick && !old) log.scrollTo({ top: logEnd(), behavior: st.animate && !old ? "smooth" : "auto" });
   }
 
   // ------------------------------------------------------------ live updates
@@ -580,7 +597,11 @@ export async function mount(root, ctx) {
       }
       if (item.id === st.open) { title.textContent = item.data.title; drawAgentTag(); if (!st.msgs.size) drawLog(); mb.refresh();
         if (item.data.unread && shell.classList.contains("thread-open") && document.visibilityState === "visible") markRead(item.id); }
-      if (st.hist?.id === item.id && !item.data.view) { st.hist = item; setStripName(); }
+      if (st.hist?.id === item.id && !item.data.view) {
+        // a view's history another page retired (new thread there): follow the view's current one, not the archived copy
+        if (st.viewThread?.id === item.id && item.data.hidden) { st.viewThread = null; st.hist = null; loadHist(emb.view); }
+        else { st.hist = item; setStripName(); }
+      }
     } else if (item.type === "message") {
       if (pills.has(item.id)) pillUpdate(item);
       if (st.hist && item.data.thread === st.hist.id) try { histMessage(item); } catch (e) { console.error(e); }
@@ -631,6 +652,13 @@ export async function mount(root, ctx) {
   }
 
   // POST /threads/:id/stop: that message's turn (none = the running one); a stopped turn keeps its partial reply
+  async function sendAgain(thread, message, btn) {
+    if (btn) btn.disabled = true;
+    try {
+      const out = await ctx.api(`${API}/threads/${encodeURIComponent(thread)}/messages/${encodeURIComponent(message)}/again`, { method: "POST", json: {} });
+      if (st.hist?.id === thread) { mine.add(out.reply.id); const e = emb; if (e?.run) runFor.set(out.reply.id, e.run); remember(out.reply.id, e.view, scopeOf(e)); }
+    } catch (e) { if (btn) btn.disabled = false; say(`Not sent again: ${e.message}`, true); }
+  }
   async function stopTurn(thread, message) {
     try { await ctx.api(`${API}/threads/${encodeURIComponent(thread)}/stop`, { json: message ? { message } : {} }); }
     catch (e) { say(`Not stopped: ${e.message}`, true); }
@@ -767,10 +795,12 @@ export async function mount(root, ctx) {
 
   // open: every message of the pinned thread, drawn as in a thread (no ids: the open thread owns those)
   function drawStripLog() {
-    const end = stripLog.scrollHeight - stripLog.clientHeight - stripLog.scrollTop < 40;
+    // as in a thread: only a new message follows the bottom, a growing one never scrolls
+    const atEnd = stripLog.scrollHeight - stripLog.clientHeight - stripLog.scrollTop < 40, had = stripMsgs.querySelectorAll(".c-msg").length;
     // as in a thread: the reply that only waits for a transcript stays out until the transcript is there
     const all = [...st.histMsgs.values()], hearing = all.some(u => u.data.role === "user" && u.data.status === "transcribing");
     const shown = all.filter(m => !(hearing && m.data.role === "agent" && m.data.status === "queued" && !st.histLive.get(m.id)?.progress));
+    const end = atEnd && shown.length > had;
     const olds = new Map([...stripMsgs.querySelectorAll(".c-msg")].map(e => [e.dataset.id, e]));
     stripMsgs.replaceChildren(...shown.map(m => { const el = messageEl(m); el.removeAttribute("id"); keepPlayers(olds.get(m.id), el); return el; }));
     if (end) stripLog.scrollTop = stripLog.scrollHeight;
@@ -787,7 +817,7 @@ export async function mount(root, ctx) {
   function openStrip(on) {
     const was = strip.classList.contains("open"), h0 = strip.getBoundingClientRect().height;
     strip.classList.toggle("open", on);
-    if (on) stripHead.insertBefore(stripTools, tmBtn); else stripRow.append(stripTools); // open: new thread, threads, full thread
+    if (on) stripHead.append(stripTools); else stripRow.append(stripTools); // open: full thread, threads, new thread (rightmost)
     if (!on) closeMenu();
     const what = on ? "Fold" : "Unfold";
     fold.setAttribute("aria-expanded", String(on)); fold.dataset.tip = what; fold.setAttribute("aria-label", what);
@@ -953,11 +983,20 @@ export async function mount(root, ctx) {
   }
 
   const visible = el => !!el.getClientRects().length;
+  // pin: a voice message keeps the thread it was recorded in, even if another one is open when it is sent
   mb.offer({ id: "thread", label: () => threadOf(st.open)?.data.title || "This thread",
     shown: () => !!st.open && visible(main), busy: () => !!st.open && busyIn(st.msgs),
+    pin: () => st.open ? { thread: st.open, label: plain(threadOf(st.open)?.data.title || "") || "a thread" } : null,
+    sendPinned: (p, body) => post(p.thread, body),
     send: async body => { const id = await ensureThread(); return post(id, body); } });
   mb.offer({ id: "threads", label: () => "Thread list", shown: () => visible(side),
     placeholder: () => "Ask the list: open, rename, hide threads", busy: () => !!st.hist && busyIn(st.histMsgs),
+    pin: () => ({ thread: "view:threads", label: "Thread list" }),
+    sendPinned: async (_p, body) => {
+      if (emb.view === "threads") return sendView("threads", body);
+      const t = await ctx.api(`${API}/views/threads/thread`, { method: "POST", json: {} }); // the list is not on screen: its history, no list context
+      return ctx.api(`${API}/threads/${encodeURIComponent(t.id)}/messages`, { json: { ...body, from: HOME.from } });
+    },
     send: async body => { if (emb.view !== "threads") embedHome(); return sendView("threads", body); } });
 
   // ------------------------------------------------------------ the embedded chat elsewhere
@@ -969,8 +1008,8 @@ export async function mount(root, ctx) {
     from: "thread list", describe: () => describeList(), run: null };
   let emb = HOME;
   function embed(view, box, opts = {}) {
+    view = viewName(view); // a malformed stored name (e.g. made by an agent) never leaves a view without its conversation
     notePlace(view, opts);
-    if (!/^[a-z][a-z0-9-]{0,30}$/.test(view)) throw new Error("bad view name");
     emb = { ...opts, view };
     closeMenu();
     if (strip.parentElement !== box || strip.nextElementSibling) box.append(strip);
@@ -979,6 +1018,10 @@ export async function mount(root, ctx) {
     return { send: body => sendView(view, body), busy: () => (isAlt() ? st.altView === view : st.hist?.data.view === view) && busyIn(st.histMsgs), retry: () => retryPending() };
   }
   function embedHome() { embed("threads", side, HOME); }
+  function viewName(v) {
+    const n = String(v || "").toLowerCase().replace(/[^a-z0-9-]/g, "").replace(/^[^a-z]+/, "").slice(0, 31);
+    return n || "view";
+  }
   async function sendView(view, body) {
     const e = emb;
     if (e.view !== view) throw new Error("that conversation is not on screen");

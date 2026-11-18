@@ -21,11 +21,13 @@ export function createPush(ctx) {
   let endpoint = "", sent = "", sentAt = 0;
   const sub = async () => { const r = await reg(); return r?.pushManager ? r.pushManager.getSubscription() : null; };
   const post = (path, json) => ctx.api(`/k/push/${path}`, { method: "POST", json });
-  async function subscribe(r) {
+  // fresh = drop this browser's old subscription first (the push service may have expired it
+  // while the browser still hands it out: the server then gets 410 on the first push)
+  async function subscribe(r, fresh = false) {
     const { key } = await ctx.api("/k/push/key");
     let s = await r.pushManager.getSubscription();
     const cur = s?.options?.applicationServerKey;
-    if (s && cur && b64u(cur) !== key) { await s.unsubscribe().catch(() => {}); s = null; } // the server's key changed
+    if (s && (fresh || (cur && b64u(cur) !== key))) { await s.unsubscribe().catch(() => {}); s = null; } // stale, or the server's key changed
     s ||= await r.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(key) });
     await post("subscribe", { subscription: s.toJSON(), label: label() });
     endpoint = s.endpoint; sent = "";
@@ -42,7 +44,7 @@ export function createPush(ctx) {
       const perm = await Notification.requestPermission();
       if (perm !== "granted") throw new Error(perm === "denied" ? "notifications are blocked for this site in the browser settings" : "permission not given");
       const r = await navigator.serviceWorker.ready;
-      await subscribe(r);
+      await subscribe(r, true);
       return api.state();
     },
     async disable() {
@@ -54,7 +56,12 @@ export function createPush(ctx) {
     async test() {
       const s = await sub();
       if (!s) throw new Error("not enabled on this device");
-      return post("test", { endpoint: s.endpoint });
+      // the server lost or dropped this subscription (404 / 410): subscribe afresh, try once more
+      const once = ep => post("test", { endpoint: ep }).then(r => (r.results || []).some(x => x.dropped) ? null : r, () => null);
+      const r = await once(s.endpoint);
+      if (r) return r;
+      const n = await subscribe(await navigator.serviceWorker.ready, true);
+      return post("test", { endpoint: n.endpoint });
     },
     shows(fn) { providers.add(fn); look(); return () => providers.delete(fn); },
   };

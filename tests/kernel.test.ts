@@ -258,6 +258,31 @@ test("chat notices: a local service starts a turn without a user message; same k
   expect((await call("PATCH", `/p/chat/threads/${t.id}`, { read: true })).status).toBe(200);
 });
 
+test("chat say: an authorised local agent posts an unprompted message; proxied or keyless calls are refused", async () => {
+  process.env.SLEIPNYR2_MCP_KEY = "test-say-key-0123456789";
+  const t = (await call("POST", "/p/chat/threads", {})).body;
+  await call("PATCH", `/p/chat/threads/${t.id}`, { hidden: true });
+  const say = (body: unknown, headers: Record<string, string> = {}) => app.fetch(new Request(`http://x/p/chat/threads/${t.id}/say`,
+    { method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json", ...headers } }));
+  const auth = { authorization: "Bearer test-say-key-0123456789" };
+  expect((await say({ text: "x" })).status).toBe(401);
+  expect((await say({ text: "x" }, { authorization: "Bearer wrong-key-wrong-key-00" })).status).toBe(401);
+  expect((await say({ text: "x" }, { ...auth, "x-forwarded-for": "100.1.2.3" })).status).toBe(403);
+  expect((await say({ text: " " }, auth)).status).toBe(400);
+  const one = await say({ text: "Done: the job finished.", key: "job:1" }, auth);
+  expect(one.status).toBe(201);
+  const m = (await one.json()).message;
+  expect(m.data).toMatchObject({ role: "agent", status: "done", unprompted: true, text: "Done: the job finished." });
+  const two = await say({ text: "Done: the job finished.", key: "job:1" }, auth);
+  expect(two.status).toBe(200);
+  expect((await two.json()).message.id).toBe(m.id);
+  const msgs = (await call("GET", `/p/chat/threads/${t.id}/messages`)).body;
+  expect(msgs.length).toBe(1);
+  const th = (await call("GET", `/k/items/${t.id}`)).body.data;
+  expect(th.unread).toBe(true);
+  expect(th.hidden).toBeFalsy();
+});
+
 test("chat refuses empty messages and unknown files", async () => {
   const t = (await call("POST", "/p/chat/threads", {})).body;
   expect((await call("POST", `/p/chat/threads/${t.id}/messages`, { text: " " })).status).toBe(400);
@@ -575,4 +600,18 @@ test("fixAudio keeps non-audio and undecodable bytes unchanged", async () => {
   const bad = await fixAudio(txt, "audio/webm");
   expect(bad.bytes).toBe(txt);
   expect(bad.mime).toBe("audio/webm");
+});
+
+test("view turns in a retired history thread still get their @lines taken out (Blackboards, 9 Nov)", () => {
+  const A = "I've added my verdict.\n@note Effective attenuation: is it a discovery?\n**Short verdict:** real.\n- **Already known:**\n  - Akkaynak & Treibitz (CVPR 2018)\nGo ahead with this test, together with the check?\n@end\n@new w31 your question\n@arrange 5. CVPR push today: Sea-thru, methods, abstracts by 15:00";
+  const B = "Queued.\n@note Effective attenuation: my call\n**Decision:** run it.\n- **Why:** cheap, \"image attenuation is not c\".\n@end\n@new w32 my call\n@arrange 5. CVPR push today: Sea-thru, methods, abstracts by 15:00";
+  const C = "I agree.\n@note Abstracts v3: no cap\n- **Now:** every direction.\n- Still due at 15:00 (t_a7870990).\n@end\n@new w33 abstracts: cap lifted";
+  for (const [text, id, args] of [[A, "w31", "w31 your question"], [B, "w32", "w32 my call"], [C, "w33", "w33 abstracts: cap lifted"]]) {
+    const r = extractActions(text);
+    expect(r.text).not.toContain("@");
+    expect(r.actions.map(a => a.name)).toEqual(text === C ? ["note", "new"] : ["note", "new", "arrange"]);
+    expect(r.actions[0].body!.length).toBeGreaterThan(30);
+    expect(r.actions[1]).toEqual({ name: "new", args });
+    void id;
+  }
 });

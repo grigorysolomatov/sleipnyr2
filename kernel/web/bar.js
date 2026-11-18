@@ -3,8 +3,12 @@
 // the bar sends what the person typed, said or attached to the focused one.
 //
 //   const bar = createBar(ctx)       the shell does this once; ctx.bar = bar
-//   bar.offer({ id, label, send, shown?, placeholder?, busy? }) -> withdraw()
-//       send({ text, files, voice, mode?, recording? }) -> Promise   files = attached file ids,
+//   bar.offer({ id, label, send, shown?, placeholder?, busy?, pin?, sendPinned? }) -> withdraw()
+//       pin() -> where a message started now should go ({target, thread, label}),
+//         or null; sendPinned(pin, body) sends there even when another view or
+//         thread is on screen by then (a voice message keeps the destination it
+//         had when recording started, also when it is resent from the outbox)
+//       send({ text, files, voice, mode?, recording?, clientId?, recordedAt? }) -> Promise   files = attached file ids,
 //         voice = file id of a recording (or undefined); reject = not sent
 //         recording = what the person saw and did while recording a voice
 //         message (web/recctx.js; only with voice, feature recordingContext)
@@ -92,6 +96,7 @@ const outbox = (() => {
       tx.oncomplete = () => { db.close(); ok(q?.result); }; tx.onerror = tx.onabort = () => { db.close(); no(tx.error); };
     });
   };
+  // kind "text" = a typed message (with uploaded attachment ids) that failed to send
   const safe = async (fn, fallback) => { try { return await fn(); } catch (e) { console.warn("outbox:", e); return fallback; } };
   return {
     put: rec => safe(() => run("readwrite", s => s.put(rec))),
@@ -104,7 +109,7 @@ export function createBar(ctx, app) {
   const targets = new Map(); // id -> target, in offer order
   let current = "";
   const changes = new Set();
-  const b = { pending: [], recording: null, sending: false, asking: null }; // pending = attachments {file, url, id, error, upload}
+  const b = { pending: [], recording: null, sending: false, asking: null, textRec: null }; // pending = attachments {file, url, id, error, upload}; textRec = outbox copy of a typed message that failed
 
   // ------------------------------------------------------------ layout
   const tray = h("div", { class: "mb-tray", hidden: true });
@@ -123,10 +128,11 @@ export function createBar(ctx, app) {
     h("button", { class: "mb-btn", type: "button", "data-tip": "Pick any file", "aria-label": "Files", onclick: () => choose(picker) }, "Files"));
   const attach = h("button", { class: "mb-btn mb-attach", type: "button", "data-k-id": "bar-attach", "data-k-kind": "modality", "data-k-label": "Attach", "data-tip": "Attach photos, a camera shot or files", "aria-label": "Attach photos, a camera shot or files", onclick: () => { pick.hidden = !pick.hidden; } }, "+");
   const lvBars = [0, 1, 2, 3, 4].map(() => h("u"));
+  const recAttach = h("button", { class: "mb-btn mb-attach mb-rec-attach", type: "button", "data-tip": "Attach photos, a camera shot or files", "aria-label": "Attach photos, a camera shot or files", onclick: () => { pick.hidden = !pick.hidden; } }, "+");
   const recTime = h("b", {}, "0:00"), recHint = h("small", {}, "recording");
   const recBar = h("div", { class: "mb-rec", hidden: true },
     h("button", { class: "mb-btn", type: "button", "data-tip": "Discard recording", "aria-label": "Discard recording", onclick: () => stopVoice(false) }, "✕"),
-    h("span", { class: "mb-dot", "aria-hidden": "true" }), recTime, h("span", { class: "mb-lv", "aria-hidden": "true" }, lvBars), recHint);
+    h("span", { class: "mb-dot", "aria-hidden": "true" }), recTime, h("span", { class: "mb-lv", "aria-hidden": "true" }, lvBars), recHint, recAttach);
   // each mode hides behind a button (text, voice); tooltips on hover / long-press
   const mic = h("button", { class: "mb-btn mb-ic mb-mic", type: "button", "data-k-id": "bar-mic", "data-k-kind": "modality", "data-k-label": "Voice message", "data-tip": "Voice message (Alt+V)", "aria-label": "Voice message", onclick: () => toggleVoice() }, svg(MIC));
   const keys = h("button", { class: "mb-btn mb-ic mb-keys", type: "button", "data-k-id": "bar-keys", "data-k-kind": "modality", "data-k-label": "Type a message", "data-tip": "Type a message (Alt+M)", "aria-label": "Type a message", onclick: () => openText() }, svg(KEYS));
@@ -190,9 +196,25 @@ export function createBar(ctx, app) {
     return t.send(input);
   }
 
+  // where a message started now goes: the focused target's pin (chat: that thread)
+  const pinNow = () => { const t = aim(); try { const p = t?.pin?.(); return p ? { ...p, target: t.id } : null; } catch { return null; } };
+  const samePin = (a, b) => !!a && !!b && a.target === b.target && (a.thread || "") === (b.thread || "");
+  // a stored message goes to its pin, else (a target without pins) to what is focused now
+  async function deliverRec(r, body, here = false) {
+    if (r.pin && !here) {
+      let t = targets.get(r.pin.target);
+      for (let i = 0; !t?.sendPinned && i < 30; i++) { await new Promise(ok => setTimeout(ok, 500)); t = targets.get(r.pin.target); } // page still mounting
+      if (!t?.sendPinned) throw new Error("that conversation is not open on this page");
+      return t.sendPinned(r.pin, body);
+    }
+    return deliver(body);
+  }
+
   // "" = the target is idle (no choice), else what the user picked; nothing they send is ever lost
-  function whenMode() {
+  // pin: a pinned message asks only while its own thread is the one on screen
+  function whenMode(pin) {
     let busy = false;
+    if (pin && !samePin(pin, pinNow())) return Promise.resolve("");
     try { busy = !!aim()?.busy?.(); } catch { /* treat as idle */ }
     if (!busy) return Promise.resolve("");
     when.hidden = false; queueBtn.focus({ preventScroll: true });
@@ -291,7 +313,7 @@ export function createBar(ctx, app) {
       : new File([f], `pasted-${Date.now()}${i ? "-" + i : ""}.${(f.type.split("/")[1] || "png").replace("jpeg", "jpg")}`, { type: f.type })));
   });
   for (const inp of [picker, photos, camera]) inp.addEventListener("change", () => { addFiles([...inp.files]); inp.value = ""; });
-  addEventListener("pointerdown", e => { if (!pick.hidden && !pick.contains(e.target) && !attach.contains(e.target)) pick.hidden = true; });
+  addEventListener("pointerdown", e => { if (!pick.hidden && !pick.contains(e.target) && !attach.contains(e.target) && !recAttach.contains(e.target)) pick.hidden = true; });
   addEventListener("keydown", e => { if (e.key === "Escape") pick.hidden = true; });
   // drop anywhere in the app: the whole screen shows the drop hint
   app.addEventListener("dragover", e => { if ([...e.dataTransfer.types].includes("Files")) { e.preventDefault(); app.classList.add("mb-drop"); } });
@@ -316,15 +338,43 @@ export function createBar(ctx, app) {
     if (b.sending || b.asking || (!text && !b.pending.length)) return;
     const mode = await whenMode();
     b.sending = true; form.classList.add("busy"); say(""); sentFx();
+    const tid = b.textRec?.id || `t${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, tpin = pinNow();
     try {
       await Promise.all(b.pending.map(p => p.upload));
       const failed = b.pending.find(p => p.error);
       if (failed) throw new Error(`upload of ${failed.file.name || "a file"} failed: ${failed.error}`);
-      await deliver({ text, files: b.pending.map(p => p.id), ...(mode ? { mode } : {}) });
+      await deliver({ text, files: b.pending.map(p => p.id), clientId: tid, ...(mode ? { mode } : {}) });
+      if (b.textRec) { forget(b.textRec); b.textRec = null; }
       ta.value = ""; grow(); if (document.activeElement !== ta) form.classList.remove("typing");
       b.pending.forEach(p => p.url && URL.revokeObjectURL(p.url)); b.pending = []; drawTray();
-    } catch (e) { say(`Not sent: ${e.message}`, true); }
+    } catch (e) {
+      // never lost: the text stays in the field and is stored (this device + the server) until it goes through
+      const rec = b.textRec || { id: tid, kind: "text", at: Date.now(), pin: tpin };
+      Object.assign(rec, { text, files: b.pending.map(p => p.id).filter(Boolean), href: location.pathname + location.hash, target: current, mode: mode || "" });
+      b.textRec = rec;
+      keep(rec, e, `Not sent: ${e.message} (kept)`, () => sendNow());
+    }
     finally { b.sending = false; form.classList.remove("busy"); }
+  }
+
+  // ------------------------------------------------------------ never lose a message
+  // A message that failed to send stays in the outbox (IndexedDB) and gets a
+  // server copy (item type "unsent", marked sent:true once it went through),
+  // with a Retry next to the error. Reloads retry it automatically.
+  function keep(rec, err, text, retry) {
+    rec.error = String(err?.message || err || "");
+    outbox.put(rec);
+    if (!rec.server) {
+      const data = { kind: rec.kind || "voice", text: rec.text || "", files: rec.files || [], voice: rec.voice || null, href: rec.href, error: rec.error, at: Date.now() };
+      ctx.api("/k/items", { json: { type: "unsent", data } }).then(it => { rec.server = it.id; outbox.put(rec); }).catch(() => { /* offline: this device keeps it */ });
+    }
+    say(text, true);
+    note.append(" ", h("button", { type: "button", class: "mb-retry", "data-tip": "Try sending it again now",
+      onclick: e => { e.currentTarget.disabled = true; retry(); } }, "Retry"));
+  }
+  function forget(rec) {
+    outbox.del(rec.id);
+    if (rec.server) ctx.api(`/k/items/${encodeURIComponent(rec.server)}`, { method: "PATCH", json: { sent: true } }).catch(() => {});
   }
 
   // ------------------------------------------------------------ voice
@@ -335,6 +385,7 @@ export function createBar(ctx, app) {
   let left = Infinity;
   async function startVoice() {
     say(""); left = Infinity;
+    const pin = pinNow(), at = Date.now(); // the destination is fixed when recording starts
     try {
       b.recording = "starting";
       const rec = await startRecording({
@@ -353,24 +404,24 @@ export function createBar(ctx, app) {
       // what the person sees and does meanwhile goes with the message (Settings > Features)
       let watch = null;
       if (ctx.feature?.("recordingContext")) try { watch = watchRecording(ctx); } catch (e) { console.warn("recording context:", e); }
-      b.recording = { stop: () => rec.stop(), cancel: () => { watch?.cancel(); return rec.cancel(); }, watch };
+      b.recording = { stop: () => rec.stop(), cancel: () => { watch?.cancel(); return rec.cancel(); }, watch, pin, at };
       recTime.textContent = "0:00"; form.classList.add("rec"); recBar.hidden = false;
     } catch (e) { b.recording = null; say(e.message, true); }
   }
 
-  async function stopVoice(keep) {
+  async function stopVoice(save) {
     const rec = b.recording;
     if (!rec || rec === "starting") return;
     b.recording = null; form.classList.remove("rec"); recBar.hidden = true;
-    const file = keep ? await rec.stop() : await rec.cancel();
+    const file = save ? await rec.stop() : await rec.cancel();
     let recording = null; // never let the context log stop a send
-    if (keep && rec.watch) try { recording = await Promise.race([rec.watch.stop(), new Promise(ok => setTimeout(() => ok(null), 1500))]); } catch (e) { console.warn("recording context:", e); }
-    if (!file) return keep && say("Nothing was recorded.", true);
+    if (save && rec.watch) try { recording = await Promise.race([rec.watch.stop(), new Promise(ok => setTimeout(() => ok(null), 1500))]); } catch (e) { console.warn("recording context:", e); }
+    if (!file) return save && say("Nothing was recorded.", true);
     sentFx(); form.classList.add("sending");
     const files = b.pending; // attachments waiting in the tray go with the voice message
     const rec0 = { id: `v${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, blob: file, name: file.name, type: file.type,
       text: ta.value.trim(), href: location.pathname + location.hash, target: current, voice: null, files: [], mode: "",
-      ...(recording ? { recording } : {}) };
+      pin: rec.pin, at: rec.at, ...(recording ? { recording } : {}) };
     await outbox.put(rec0); // on disk first: a reload from here on loses nothing
     try {
       const voice = await ctx.upload(file);
@@ -379,41 +430,74 @@ export function createBar(ctx, app) {
       const failed = files.find(p => p.error);
       if (failed) throw new Error(`upload of ${failed.file.name || "a file"} failed: ${failed.error}`);
       rec0.files = files.map(p => p.id); await outbox.put(rec0);
-      const mode = await whenMode();
+      const mode = await whenMode(rec0.pin);
       rec0.mode = mode || ""; await outbox.put(rec0);
-      await deliver({ text: rec0.text, voice: voice.id, files: rec0.files, ...(mode ? { mode } : {}), ...(recording ? { recording } : {}) });
-      await outbox.del(rec0.id);
+      await deliverRec(rec0, recBody(rec0));
+      forget(rec0);
       form.classList.remove("sending");
       ta.value = ""; grow();
       files.forEach(p => p.url && URL.revokeObjectURL(p.url));
       b.pending = b.pending.filter(p => !files.includes(p)); drawTray();
     } catch (e) {
       form.classList.remove("sending");
-      say(`Voice message not sent: ${e.message} (kept; it retries on reload)`, true);
+      keep(rec0, e, `Voice message not sent: ${e.message} (kept; it also retries on reload)`, () => resumeOutbox(true));
       // keep the clip reachable: offer it as a download
       note.append(" ", h("a", { href: URL.createObjectURL(file), download: file.name }, "save recording"));
     }
   }
 
-  // Recordings left in the outbox (the page went away mid-send): send them
-  // once the same view is on screen again. Gives up for this load after
-  // 2 minutes; the clip stays stored and is tried again on the next load.
-  async function resumeOutbox() {
-    const recs = (await outbox.all()).sort((x, y) => x.id < y.id ? -1 : 1);
+  // Messages left in the outbox (the page went away mid-send, or the
+  // connection was down): a pinned one goes to the thread it was recorded for,
+  // whatever is on screen now; one without a pin waits until the same view is
+  // on screen again. One older than STALE_MS is never sent silently: the bar
+  // asks (Send / Send here / Save / Drop). The server drops repeats by clientId.
+  const STALE_MS = 5 * 60e3;
+  const atOf = r => r.at || Number(String(r.id).slice(1).split("-")[0]) || Date.now();
+  const hhmm = t => { const d = new Date(t), now = new Date(); const hm = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+    return d.toDateString() === now.toDateString() ? hm : `${d.toLocaleDateString([], { day: "numeric", month: "short" })} ${hm}`; };
+  function recBody(r) {
+    return { text: r.text || "", files: r.files || [], ...(r.voice ? { voice: r.voice } : {}), ...(r.mode ? { mode: r.mode } : {}),
+      ...(r.recording ? { recording: r.recording } : {}), clientId: r.id, recordedAt: atOf(r) };
+  }
+  const decided = new Map(); // outbox id -> "send" (to its pin) | "here" (to what is on screen), this page load only
+  function retryBtn() { note.append(" ", h("button", { type: "button", class: "mb-retry", "data-tip": "Try sending it again now", onclick: () => resumeOutbox(true) }, "Retry")); }
+  function askAbout(r, why) {
+    const what = r.kind === "text" ? "A message" : "A voice message";
+    const dest = r.pin?.label ? ` for “${r.pin.label}”` : "";
+    say(`${what}${dest} from ${hhmm(atOf(r))} was not sent${why ? ` (${why})` : ""}.`, true);
+    const go = mode => e => { e.currentTarget.disabled = true; decided.set(r.id, mode); resumeOutbox(true); };
+    const btn = (label, tip, onclick) => h("button", { type: "button", class: "mb-retry", "data-tip": tip, onclick }, label);
+    if (r.pin) note.append(" ", btn("Send", `Send it now to ${r.pin.label ? `“${r.pin.label}”` : "where it was recorded"}, marked as late`, go("send")));
+    if (!r.pin || !samePin(r.pin, pinNow())) note.append(" ", btn(r.pin ? "Send here" : "Send", "Send it now to the conversation on screen, marked as late", go("here")));
+    if (r.blob) note.append(" ", h("a", { href: URL.createObjectURL(r.blob), download: r.name || "voice.webm", "data-tip": "Download the recording" }, "save"));
+    note.append(" ", btn("Drop", "Remove it from this device's outbox (nothing is sent)", () => { forget(r); decided.delete(r.id); say(""); resumeOutbox(); }));
+  }
+  let resuming = false;
+  async function resumeOutbox(now = false) {
+    if (resuming) return;
+    resuming = true;
+    try { await resumeAll(now); } finally { resuming = false; }
+  }
+  async function resumeAll(now) {
+    const recs = (await outbox.all()).filter(r => r !== b.textRec && r.id !== b.textRec?.id).sort((x, y) => x.id < y.id ? -1 : 1);
     for (const r of recs) {
-      const t0 = Date.now();
-      while (!(aim() && (r.href === location.pathname + location.hash || Date.now() - t0 > 15000))) {
-        if (Date.now() - t0 > 120000) return;
-        await new Promise(ok => setTimeout(ok, 500));
+      let pick = decided.get(r.id);
+      if (!pick && Date.now() - atOf(r) > STALE_MS) { askAbout(r, "the connection was down"); return; }
+      if (!pick && r.pin) pick = "send";
+      if (!pick) { // no pin (a view without pins): only into the same view, never silently elsewhere
+        const t0 = Date.now();
+        while (!(aim() && r.href === location.pathname + location.hash && (!r.target || r.target === current))) {
+          if (now || Date.now() - t0 > 15000) { askAbout(r, "another view is on screen"); return; }
+          await new Promise(ok => setTimeout(ok, 500));
+        }
+        pick = "here";
       }
       try {
-        say("Sending a voice message that was interrupted…");
-        const voice = r.voice ? { id: r.voice }
-          : await ctx.upload(new File([r.blob], r.name, { type: r.type }));
-        if (!r.voice) { r.voice = voice.id; await outbox.put(r); }
-        await deliver({ text: r.text, voice: voice.id, files: r.files || [], ...(r.mode ? { mode: r.mode } : {}), ...(r.recording ? { recording: r.recording } : {}) });
-        await outbox.del(r.id); say("");
-      } catch (e) { say(`Voice message still not sent: ${e.message}`, true); return; }
+        say(r.kind === "text" ? "Sending a message that did not go through…" : "Sending a voice message that was interrupted…");
+        if (r.kind !== "text" && !r.voice) { r.voice = (await ctx.upload(new File([r.blob], r.name, { type: r.type }))).id; await outbox.put(r); }
+        await deliverRec(r, recBody(r), pick === "here");
+        forget(r); decided.delete(r.id); say("");
+      } catch (e) { say(`${r.kind === "text" ? "Message" : "Voice message"} still not sent: ${e.message} (kept)`, true); retryBtn(); return; }
     }
   }
   setTimeout(resumeOutbox, 0);
@@ -426,7 +510,7 @@ export function createBar(ctx, app) {
     else if (k === "m") { e.preventDefault(); openText(); }
   });
 
-  return { el: form, offer, focus, focused: () => current, say, refresh: drawTarget, deliver, modality,
+  return { el: form, offer, focus, focused: () => current, say, refresh: drawTarget, deliver, modality, outbox,
     onChange: fn => { changes.add(fn); return () => changes.delete(fn); } };
 }
 

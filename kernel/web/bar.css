@@ -94,8 +94,8 @@
 /* recording: the spacer after the bars + timer balances the X, so they sit centred;
    the hint shows only as the no-signal warning */
 .mb-rec { flex: 1; display: flex; align-items: center; justify-content: center; gap: .6rem; min-height: 2.5rem; }
-.mb-rec::after { content: ""; order: 9; margin-left: auto; width: 0; }
-.mb-rec > .mb-btn { margin-right: auto; border-color: var(--icon-frame); }
+.mb-rec .mb-rec-attach { order: 9; margin-left: auto; min-width: 2.5rem; }
+.mb-rec > .mb-btn:first-child { margin-right: auto; border-color: var(--icon-frame); }
 .mb-rec > b { order: 2; color: var(--rec-color); }
 .mb-rec small { order: 3; color: var(--text-muted); }
 .mb-rec:not(.quiet) small { display: none; }
@@ -139,6 +139,7 @@
 .mb-note.bad { color: var(--text); }
 .mb-note.bad::before { content: "! "; font-weight: 700; }
 .mb-note a { color: var(--text); }
+.mb-retry { background: none; color: var(--accent-here); border: 1px solid var(--accent-here); border-radius: var(--radius); padding: .1rem .5rem; margin-left: .25rem; font: inherit; cursor: pointer; }
 .k-tip {
   position: fixed; z-index: 60; max-width: 16rem; padding: .3rem .55rem; font-size: .8rem; pointer-events: none;
   background: var(--bg); color: var(--text); border: 1px solid var(--text); border-radius: var(--radius);

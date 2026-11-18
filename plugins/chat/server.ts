@@ -26,7 +26,10 @@
 //   (default http://127.0.0.1:9122, key in $AGENT_FILES_KEY). Reply lines
 //   "MEDIA:/abs/path" are fetched from it, saved as files of the reply and
 //   removed from its text.
+//   postKeyEnv = env var holding the bearer key for POST /threads/:id/say (default SLEIPNYR2_MCP_KEY);
+//   unset or shorter than 16 characters = the route refuses everything.
 import { bad, ITEM_TOPIC } from "../../kernel/contract.ts";
+import { timingSafeEqual } from "node:crypto";
 import { cleanRecording, recordingNote, FEATURE as RECORDING, type Recording } from "./recording.ts";
 import type {
   AgentService, AgentTurn, AttachedFile, FileData, Item, Kernel, PushNote, ServerPlugin, TranscribeService,
@@ -48,9 +51,18 @@ export interface Message {
   // stopped (agent reply): stopped by the user; skipped = it never ran. cancelled (user message): never sent.
   // steered: the user message went into the turn that was already running (its reply stays empty, hidden).
   skipped?: boolean; steered?: boolean;
+  // clientId (user message): the sending device's id for it; a repeat with the same id returns the first post.
+  // recordedAt: when the device made it (ms); much earlier than created = it waited in the device's outbox.
+  clientId?: string; recordedAt?: number;
+  // replyStopped (user message): kept and shown, the user stopped its reply (a stop while it was heard or
+  // waiting never drops the message); resent = id of the copy made by "send again"
+  replyStopped?: boolean; resent?: string;
   // notice: posted by a local service, not typed by the user (e.g. "Card t_1 done: title"); shown as this
   // one quiet line while the agent gets the full text. noticeKey makes a repeated post a no-op.
   notice?: string; noticeKey?: string;
+  // unprompted (agent message): posted by the agent on its own (POST /threads/:id/say), not a reply;
+  // sayKey makes a repeated post a no-op; told = the agent's next turn was given its text
+  unprompted?: boolean; sayKey?: string; told?: boolean;
 }
 
 /** One message waiting for or getting its reply. preparing = a "send now" being transcribed (the line waits). */
@@ -60,6 +72,7 @@ interface Active { job: Job; ctl: AbortController; stage: "hearing" | "working";
 
 export const TOPIC = "chat";
 const SAVE_EVERY_MS = 3000; // a streaming reply is saved this often, so a reload shows it
+const FLUSH_MS = 400; // ...and this soon after a burst of deltas starts (the embedded strip shows only saved text)
 
 /** First words of the first message, as a thread title. */
 export function titleFrom(text: string): string {
@@ -122,6 +135,14 @@ export function extractActions(text: string): { text: string; actions: Action[] 
 }
 
 const IDS_SHOWN = 6; // earlier messages listed by id in each turn note
+
+/** For the agent: a message that reached the server long after it was made (it waited in the device's outbox). */
+export function lateNote(user: { created: number | string; data: { recordedAt?: number } }, minMs = 2 * 60e3): string {
+  const made = Number(user.data.recordedAt), got = Number(user.created);
+  if (!made || !(got - made > minMs)) return "";
+  const t = (ms: number) => new Date(ms).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
+  return `[Late delivery: made at ${t(made)}, reached the server at ${t(got)} (${Math.round((got - made) / 60e3)} min later; it waited on the device while the connection was down). It may be out of date.]`;
+}
 
 export function voicePrompt(user: string, transcript: string): string {
   return `[Voice message from ${user}, transcribed on the server (may contain recognition errors):]\n${transcript}`;
@@ -405,12 +426,61 @@ class Chat {
     return out;
   }
 
+  /**
+   * POST /threads/:id/say: the agent writes into a thread on its own (a finished job, a reminder): one
+   * ordinary agent message, stored in the log, pushed to the phone, the thread bold until opened. No turn
+   * runs; the agent's next turn in this thread is told what it posted. The same key twice = the first post.
+   */
+  async say(threadId: string, b: { text?: unknown; key?: unknown }) {
+    const t = this.k.items.get<Thread>(threadId);
+    if (!t || t.type !== "thread") throw new HttpError(404, "no such thread");
+    const raw = String(b.text ?? "").slice(0, 20000), key = String(b.key ?? "").slice(0, 120);
+    if (!raw.trim()) throw new HttpError(400, "text required");
+    if (key) {
+      const old = this.messages(threadId).find(m => m.data.sayKey === key);
+      if (old) return { message: old, repeated: true };
+    }
+    const out = await this.media(raw);
+    const m = this.k.items.create<Message>("message", { thread: threadId, role: "agent", text: out.text, files: out.files,
+      status: "done", unprompted: true, ...(key ? { sayKey: key } : {}) });
+    this.k.links.add(m.id, "in", threadId);
+    for (const f of out.files) this.k.links.add(m.id, "file", f);
+    if (!t.data.view) this.k.items.update<Thread>(threadId, { unread: true, ...(t.data.hidden ? { hidden: null } : {}) });
+    this.pushReply(threadId, out.text, out.files.length);
+    return { message: this.k.items.get<Message>(m.id)!, repeated: false };
+  }
+
+  /** Does the request carry the say key? (env postKeyEnv; unset or short = nobody) */
+  sayAllowed(req: Request): boolean {
+    const key = process.env[String(this.k.config.postKeyEnv || "SLEIPNYR2_MCP_KEY")] || "";
+    const m = /^Bearer\s+(\S+)$/i.exec(req.headers.get("authorization") || "");
+    if (key.length < 16 || !m) return false;
+    const x = Buffer.from(m[1]), y = Buffer.from(key);
+    return x.length === y.length && timingSafeEqual(x, y);
+  }
+
+  /** What the agent posted on its own since its last turn here, for that turn's prompt (once). */
+  private toldNote(threadId: string): string {
+    const ms = this.messages(threadId).filter(m => m.data.unprompted && !m.data.told);
+    if (!ms.length) return "";
+    for (const m of ms) this.k.items.update(m.id, { told: true });
+    return "[Posted by you in this thread on your own since your last turn here (the user saw these):\n"
+      + ms.slice(-5).map(m => `- ${String(m.data.text).slice(0, 1500)}`).join("\n") + "]\n\n";
+  }
+
   /** Saves the user's message and a placeholder reply, then runs the turn in the background. */
   /** view.transcript: the voice was already transcribed (hands-free talk mode), so the turn skips hearing. */
-  post(threadId: string, text: string, files: string[], voice?: string, view?: { from?: string; context?: string; transcript?: string; recording?: unknown }, mode = "queue", extra: Partial<Message> = {}) {
+  post(threadId: string, text: string, files: string[], voice?: string, view?: { from?: string; context?: string; transcript?: string; recording?: unknown; clientId?: unknown; recordedAt?: unknown }, mode = "queue", extra: Partial<Message> = {}) {
     if (mode !== "queue" && mode !== "now") throw new Error("mode must be queue or now");
     const thread = this.k.items.get<Thread>(threadId);
     if (!thread || thread.type !== "thread") throw new Error("no such thread");
+    // a device resending from its outbox (the first try may have arrived after all): one message, never two
+    const clientId = typeof view?.clientId === "string" ? view.clientId.slice(0, 80) : "";
+    if (clientId) {
+      const old = this.k.items.list<Message>({ type: "message", order: "-created", limit: 2000 }).find(m => m.data.clientId === clientId && m.data.role === "user");
+      if (old) return { user: old, reply: (old.data.reply && this.k.items.get<Message>(old.data.reply)) || old, repeated: true };
+    }
+    const at = Number(view?.recordedAt), recordedAt = Number.isFinite(at) && at > 0 && at <= Date.now() + 60e3 ? Math.round(at) : 0;
     for (const f of [...files, ...(voice ? [voice] : [])])
       if (this.k.items.get(f)?.type !== "file") throw new Error(`no such file ${f}`);
     if (!text.trim() && !files.length && !voice) throw new Error("empty message");
@@ -420,7 +490,8 @@ class Chat {
     const recording = voice && this.recordingOn() ? cleanRecording(view?.recording) : null;
     const user = this.k.items.create<Message>("message", { thread: threadId, role: "user", text, files, voice,
       status: voice && heard === undefined ? "transcribing" : "done", ...(heard !== undefined ? { transcript: heard } : {}),
-      ...(from ? { from } : {}), ...(context ? { context } : {}), ...(recording ? { recording } : {}), ...extra });
+      ...(from ? { from } : {}), ...(context ? { context } : {}), ...(recording ? { recording } : {}),
+      ...(clientId ? { clientId } : {}), ...(recordedAt ? { recordedAt } : {}), ...extra });
     const reply = this.k.items.create<Message>("message", { thread: threadId, role: "agent", text: "", files: [], status: "queued" });
     this.k.items.update(user.id, { reply: reply.id });
     this.k.links.add(user.id, "in", threadId);
@@ -482,15 +553,15 @@ class Chat {
     } finally { job.preparing = undefined; this.pump(job.threadId); }
   }
 
-  /** Stops a running turn. While its voice message is heard, the message is cancelled (never sent). */
+  /** Stops a running turn. While its voice message is heard, only the reply is stopped: the message stays and is still transcribed. */
   private halt(a: Active) {
     if (a.ctl.signal.aborted) return;
     if (a.stage === "hearing") this.cancel(a.job);
     a.ctl.abort(new Error("stopped"));
   }
-  /** A message that never reached the agent: the user message stays (voice, transcript) marked cancelled, the reply is skipped. */
+  /** A message whose reply was stopped before it ran: the message is kept (a voice message is still transcribed), the reply is skipped; "send again" reposts it. */
   private cancel(job: Job) {
-    this.k.items.update(job.userId, { status: "cancelled" });
+    this.k.items.update(job.userId, { replyStopped: true });
     this.k.items.update(job.replyId, { status: "stopped", skipped: true });
     this.publish(job.threadId, job.userId, { progress: "" });
     this.publish(job.threadId, job.replyId, { progress: "" });
@@ -511,11 +582,36 @@ class Chat {
     if (l.active?.job.replyId === replyId) { this.halt(l.active); return { stopped: replyId }; }
     const job = l.jobs.find(j => j.replyId === replyId);
     if (!job) throw new HttpError(409, "that message is not waiting or running");
+    const hearing = !!job.preparing;
     job.preparing?.abort(new Error("stopped"));
     this.drop(job);
     this.cancel(job);
+    if (!hearing) this.hearAnyway(job); // a waiting voice message still gets its transcript
     this.pump(threadId);
     return { stopped: replyId };
+  }
+
+  /** Transcribes a kept voice message whose turn will not run (its reply was stopped while it waited). */
+  private hearAnyway(job: Job) {
+    const user = this.k.items.get<Message>(job.userId);
+    if (!user?.data.voice || user.data.transcript !== undefined) return;
+    (async () => {
+      const [audio] = await this.attached([user.data.voice!]);
+      const out = await this.stt.transcribe(audio.bytes, audio.mime);
+      this.k.items.update(job.userId, { transcript: out.text, status: "done" });
+    })().catch(e => { this.k.log("transcription after a stop failed:", e); this.k.items.update(job.userId, { status: "error", error: `transcription failed: ${(e as Error).message}` }); })
+      .finally(() => this.publish(job.threadId, job.userId, { progress: "" }));
+  }
+
+  /** POST /threads/:id/messages/:mid/again: posts a stopped, cancelled or failed user message once more (same text, files, voice, transcript, context). */
+  again(threadId: string, messageId: string) {
+    const m = this.k.items.get<Message>(messageId);
+    if (!m || m.type !== "message" || m.data.thread !== threadId || m.data.role !== "user") throw new HttpError(404, "no such message here");
+    if (m.data.resent) throw new HttpError(409, "already sent again");
+    const d = m.data, transcript = typeof d.transcript === "string" ? d.transcript : undefined;
+    const out = this.post(threadId, d.text || "", d.files || [], d.voice, { from: d.from, context: d.context, recording: d.recording, ...(transcript !== undefined ? { transcript } : {}) });
+    this.k.items.update(messageId, { resent: out.user.id });
+    return out;
   }
 
   private publish(thread: string, message: string, ev: Record<string, unknown>) {
@@ -554,15 +650,15 @@ class Chat {
     const work = (async () => {
       const [audio] = await this.attached([user.data.voice!]);
       const out = await this.stt.transcribe(audio.bytes, audio.mime);
-      const cancelled = this.k.items.get<Message>(job.userId)?.data.status === "cancelled";
-      this.k.items.update(job.userId, { transcript: out.text, ...(cancelled ? {} : { status: "done" }) });
+      this.k.items.update(job.userId, { transcript: out.text, status: "done" });
       const t = this.k.items.get<Thread>(job.threadId)!;
       if (t.data.title === titleFrom(user.data.text) && out.text) this.setAutoTitle(job.threadId, titleFrom(out.text));
     })();
     const stopped = new Promise<"stopped">(res => signal.addEventListener("abort", () => res("stopped"), { once: true }));
     try {
       if (await Promise.race([work.then(() => "heard" as const), stopped]) === "heard") return true;
-      work.catch(e => this.k.log("transcription of a cancelled message failed:", e));
+      // reply stopped while heard: the message stays; a failed transcription shows on it (audio kept)
+      work.catch(e => { this.k.log("transcription after a stop failed:", e); this.k.items.update(job.userId, { status: "error", error: `transcription failed: ${(e as Error).message}` }); this.publish(job.threadId, job.userId, { progress: "" }); });
       return false;
     } catch (e) {
       if (signal.aborted) return false;
@@ -578,7 +674,7 @@ class Chat {
   private contextOf(user: Item<Message>) {
     const ctx = user.data.context || "";
     const rec = user.data.recording && this.recordingOn() ? recordingNote(user.data.recording, ctx) : "";
-    return [ctx, rec].filter(Boolean).map(s => `\n\n${s}`).join("");
+    return [ctx, rec, lateNote(user)].filter(Boolean).map(s => `\n\n${s}`).join("");
   }
 
   /** One user message -> one agent reply. resumed = continue a run started before a restart. */
@@ -592,7 +688,7 @@ class Chat {
     text += this.contextOf(user);
 
     const thread = this.k.items.get<Thread>(threadId)!;
-    text = this.actionsNote(thread, userId, replyId) + text;
+    text = this.actionsNote(thread, userId, replyId) + this.toldNote(threadId) + text;
     a.stage = "working";
     if (resumed) a.state = { ...(thread.data.state || {}) };
     this.k.items.update(replyId, { status: "working" });
@@ -600,6 +696,14 @@ class Chat {
       text: text + this.titleGuide(thread) + this.idsNote(thread, userId, replyId), files: await this.attached(user.data.files),
       signal: this.stopping.signal, cancel: a.ctl.signal };
     let reply = "", saved = Date.now();
+    // deltas come in bursts between tool calls: save shortly after a burst starts (and at most every
+    // SAVE_EVERY_MS), so the saved copy never stays cut off after the first chunk until the next burst
+    let flushT: ReturnType<typeof setTimeout> | null = null;
+    const flush = () => {
+      flushT = null;
+      if (this.k.items.get<Message>(replyId)?.data.status !== "working") return;
+      saved = Date.now(); this.k.items.update(replyId, { text: reply });
+    };
     // stopped by the user: the partial reply stays, with a quiet note (never an error)
     const stopped = () => { this.k.items.update(replyId, { text: reply, status: "stopped" }); this.publish(threadId, replyId, { progress: "" }); };
     try {
@@ -613,14 +717,16 @@ class Chat {
         } else if (ev.type === "delta") {
           reply += ev.text;
           this.publish(threadId, replyId, { delta: ev.text });
-          if (Date.now() - saved > SAVE_EVERY_MS) { saved = Date.now(); this.k.items.update(replyId, { text: reply }); }
+          if (!flushT) flushT = setTimeout(flush, Math.max(FLUSH_MS, SAVE_EVERY_MS - (Date.now() - saved)));
         } else if (ev.type === "progress") {
           this.publish(threadId, replyId, { progress: ev.text });
         } else if (ev.type === "done") {
           const out = await this.media(ev.text || reply);
           for (const f of out.files) this.k.links.add(replyId, "file", f);
           // in a view's history thread, "@name args" lines are actions for the view to run
-          const acts = thread.data.view ? extractActions(out.text) : null;
+          // (also when the strip still shows a retired history thread, which has no view any more:
+          // the message then says which view it came from)
+          const acts = thread.data.view || user.data.from ? extractActions(out.text) : null;
           this.k.items.update(replyId, { text: acts ? acts.text : out.text, files: out.files, status: "done",
             ...(acts?.actions.length ? { actions: acts.actions } : {}) });
           this.publish(threadId, replyId, { progress: "" });
@@ -646,7 +752,7 @@ class Chat {
       if (a.ctl.signal.aborted) return stopped();
       if (this.stopping.signal.aborted) { this.k.items.update(replyId, { text: reply }); return; } // resumed after restart
       fail((e as Error).message || String(e));
-    }
+    } finally { if (flushT) clearTimeout(flushT); }
   }
 
   /** A finished reply as a phone notification (devices showing the thread get none: kernel push presence). */
@@ -749,13 +855,25 @@ const plugin: ServerPlugin = {
       },
       "GET /threads/:id/messages": (_req, p) => Response.json(c().messages(p.id)),
       "POST /threads/:id/messages": async (req, p) => {
-        const b = await req.json() as { text?: string; files?: string[]; voice?: string; from?: string; context?: string; transcript?: string; mode?: string; recording?: unknown };
+        const b = await req.json() as { text?: string; files?: string[]; voice?: string; from?: string; context?: string; transcript?: string; mode?: string; recording?: unknown; clientId?: unknown; recordedAt?: unknown };
         try { return Response.json(c().post(p.id, String(b.text || ""), b.files || [], b.voice, b, b.mode || "queue"), { status: 201 }); }
         catch (e) { return bad(e); }
+      },
+      "POST /threads/:id/messages/:mid/again": (_req, p) => {
+        try { return Response.json(c().again(p.id, p.mid), { status: 201 }); } catch (e) { return bad(e); }
       },
       "POST /threads/:id/notices": async (req, p) => {
         const b = await req.json().catch(() => ({})) as { text?: string; notice?: string; key?: string };
         try { const out = c().notify(p.id, b); return Response.json(out, { status: (out as { repeated?: boolean }).repeated ? 200 : 201 }); }
+        catch (e) { return bad(e); }
+      },
+      // local agents only: needs the bearer key, and is refused when it came through a proxy (tailnet serve)
+      "POST /threads/:id/say": async (req, p) => {
+        if (req.headers.get("x-forwarded-for") || req.headers.get("tailscale-user-login") || req.headers.get("forwarded"))
+          return Response.json({ error: "local only" }, { status: 403 });
+        if (!c().sayAllowed(req)) return Response.json({ error: "unauthorised" }, { status: 401, headers: { "www-authenticate": 'Bearer realm="sleipnyr2"' } });
+        const b = await req.json().catch(() => ({})) as { text?: string; key?: string };
+        try { const out = await c().say(p.id, b); return Response.json(out, { status: out.repeated ? 200 : 201 }); }
         catch (e) { return bad(e); }
       },
       "POST /threads/:id/stop": async (req, p) => {

@@ -29,7 +29,8 @@ Stdlib only, read-only on Kanban and state.db.
   kanban_report.py --dry-run    print what would be posted (cursors untouched)
   kanban_report.py watch <board> <card> <thread>    subscribe a card explicitly
   kanban_report.py origin <board> <card>            print the thread a card would report to
-Config (environment): KR_BOARDS (Hermes kanban boards dir), KR_STATE_DB (Hermes state.db),
+Config (environment): KR_BOARDS (Hermes kanban boards dir), KR_DEFAULT_DB (the default board's db,
+default <boards>/../../kanban.db), KR_STATE_DB (Hermes state.db),
 KR_STATE_DIR, KR_APP (app URL), KR_PREFIX (session id prefix), KR_POLL (s), KR_ORIGIN_TAG.
 """
 import argparse
@@ -44,6 +45,8 @@ import urllib.request
 
 HOME = os.path.expanduser("~")
 BOARDS = os.environ.get("KR_BOARDS", os.path.join(HOME, ".hermes/kanban/boards"))
+# the "default" board lives outside the boards dir: <hermes home>/kanban.db
+DEFAULT_DB = os.environ.get("KR_DEFAULT_DB", os.path.join(os.path.dirname(os.path.dirname(BOARDS)), "kanban.db"))
 STATE_DB = os.environ.get("KR_STATE_DB", os.path.join(HOME, ".hermes/state.db"))
 STATE_DIR = os.environ.get("KR_STATE_DIR", os.path.join(HOME, ".local/state/sleipnyr2-kanban-report"))
 APP = os.environ.get("KR_APP", "http://127.0.0.1:8180").rstrip("/")
@@ -68,11 +71,13 @@ def ro(path):
 
 def boards():
     out = []
+    if os.path.exists(DEFAULT_DB) and os.path.getsize(DEFAULT_DB) > 0:
+        out.append(("default", DEFAULT_DB))
     if not os.path.isdir(BOARDS):
         return out
     for slug in sorted(os.listdir(BOARDS)):
         db = os.path.join(BOARDS, slug, "kanban.db")
-        if slug.startswith("_") or os.path.islink(os.path.join(BOARDS, slug)) or not os.path.exists(db):
+        if slug == "default" or slug.startswith("_") or os.path.islink(os.path.join(BOARDS, slug)) or not os.path.exists(db):
             continue  # symlinks are old-slug aliases; archived boards still count (a card can finish there)
         out.append((slug, db))
     return out
@@ -296,7 +301,7 @@ def main():
             return
         if a.cmd[0] == "origin" and len(a.cmd) == 3:
             _, slug, tid = a.cmd
-            con = ro(os.path.join(BOARDS, slug, "kanban.db"))
+            con = ro(dict(boards()).get(slug) or os.path.join(BOARDS, slug, "kanban.db"))
             try:
                 print(origin(con, slug, tid, load("watch.json", {})) or "-")
             finally:

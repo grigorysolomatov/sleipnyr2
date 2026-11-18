@@ -111,7 +111,7 @@ export function srcOf(w) {
     case "threads": return `/?${f}`;
     case "tinder": return `/m/tinder?${f}`;
     case "projects": return `/m/projects${w.ref ? "/" + encodeURIComponent(w.ref) : ""}?${f}`;
-    case "file": return `/k/files/${encodeURIComponent(w.ref)}`;
+    case "file": return `/k/files/${encodeURIComponent(w.ref)}#navpanes=0&view=FitH`;
     case "url": return safeUrl(w.ref);
   }
   return "";
@@ -309,7 +309,7 @@ export function mount(box, ctx) {
   // ------------------------------------------------------------ the board
   const plane = h("div", { class: "ss-plane" });
   // the dot grid is its own layer, moved by transform (no repaint while panning)
-  const dots = h("div", { class: "ss-dots", "aria-hidden": "true" });
+  const dots = h("canvas", { class: "ss-dots", "aria-hidden": "true" });
   // where a dragged window will land (the snapped grid slot)
   const ghost = h("div", { class: "ss-ghost", hidden: true, "aria-hidden": "true" });
   plane.append(ghost);
@@ -539,16 +539,35 @@ export function mount(box, ctx) {
   }
   const geo = w => ({ x: w.x, y: w.y, w: w.w, h: w.h });
   // one view update per frame; the plane and the dots move by transform only
-  let viewRaf = 0, dotSize = "";
+  // The grid is ONE canvas exactly the size of the board, redrawn per view
+  // change from a one-cell pattern (a huge CSS-repeated layer let some GPUs
+  // stop drawing it below a certain height).
+  let dotKey = "", dotTile = null;
+  function paintDots(v) {
+    const r = board.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    const W = Math.max(1, Math.round(r.width * dpr)), H = Math.max(1, Math.round(r.height * dpr));
+    if (dots.width !== W) dots.width = W;
+    if (dots.height !== H) dots.height = H;
+    const cx = dots.getContext("2d"); if (!cx) return;
+    const c = GRID * v.z * dpr, T = Math.max(2, Math.round(c)), col = getComputedStyle(dots).color;
+    const key = `${T}|${dpr}|${col}`;
+    if (key !== dotKey) {
+      dotKey = key; dotTile = document.createElement("canvas"); dotTile.width = dotTile.height = T;
+      const t = dotTile.getContext("2d"); t.fillStyle = col; t.beginPath();
+      t.arc(T / 2, T / 2, 1.1 * dpr, 0, Math.PI * 2); t.fill();
+    }
+    const pat = cx.createPattern(dotTile, "repeat"); if (!pat) return;
+    pat.setTransform(new DOMMatrix().translate(v.x * dpr, v.y * dpr).scale(c / T));
+    cx.clearRect(0, 0, W, H); cx.fillStyle = pat; cx.fillRect(0, 0, W, H);
+  }
+  new ResizeObserver(() => { if (st.open) paintDots(viewOf()); }).observe(board);
+  let viewRaf = 0;
   function applyView() { if (!viewRaf) viewRaf = requestAnimationFrame(paintView); }
   function paintView() {
     viewRaf = 0;
     const v = viewOf();
     plane.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.z})`;
-    const c = GRID * v.z, m = n => (((n + 64) % c) + c) % c; // the layer reaches 64px past each edge
-    dots.style.transform = `translate(${m(v.x)}px, ${m(v.y)}px)`;
-    const ds = `${c}px ${c}px`;
-    if (ds !== dotSize) { dotSize = ds; dots.style.backgroundSize = ds; }
+    paintDots(v);
     const zt = `${Math.round(v.z * 100)} %`;
     if (zoomEl.textContent !== zt) zoomEl.textContent = zt;
     sharpenSoon();

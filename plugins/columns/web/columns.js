@@ -93,7 +93,7 @@ export function srcOf(p) {
     case "threads": return `/?${f}`;
     case "tinder": return `/m/tinder?${f}`;
     case "projects": return `/m/projects${p.ref ? "/" + encodeURIComponent(p.ref) : ""}?${f}`;
-    case "file": return `/k/files/${encodeURIComponent(p.ref)}`;
+    case "file": return `/k/files/${encodeURIComponent(p.ref)}#navpanes=0&view=FitH`;
     case "url": return safeUrl(p.ref);
   }
   return "";
