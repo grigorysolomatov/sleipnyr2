@@ -22,6 +22,12 @@
 // tiles: drag to move (snapped to a 10 px grid), the bottom-right handle resizes
 //   (desktop: on hover; phone: tap the tile first); menu = colour, Duplicate
 //   (the copy goes right beside it), Lock (a locked tile stays put: drags on it pan)
+// copy + paste (meeples and tiles; cards belong to their deck, so not them):
+//   a click / tap selects a piece (pink), empty table or Escape clears;
+//   Ctrl+C (Cmd+C) copies the selected piece, Ctrl+V pastes one copy per press:
+//   at the pointer if it moved since the last paste, else right beside the last
+//   one (tiles edge to edge), so C then V V V builds a row. The menus offer
+//   Copy (on a piece) and Paste (on empty table). The copy lives in this tab only.
 //
 // Saved item (kernel /k/items), one per game:
 //   game {title, chatView, sets: [{id, kind, x, y}], objects: [{id, kind, x, y, ...}]}
@@ -70,6 +76,8 @@ const h = (tag, attrs = {}, ...kids) => {
 };
 const svg = s => { const t = document.createElement("template"); t.innerHTML = s; return t.content.firstChild; };
 const icon = (ic, tip, onclick, cls = "") => h("button", { class: `c-btn c-ic ${cls}`.trim(), type: "button", "data-tip": tip, "aria-label": tip, onclick }, svg(ic));
+// the copied piece {kind, color, w, h}: per tab, shared by every game
+let CLIP = null;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const ease = t => 1 - Math.pow(1 - t, 3);
 
@@ -348,6 +356,40 @@ export function mount(box, ctx) {
     if (on && st.sel === o.id) select("");
     commit(Tiles.setLocked(table(), o.id, on));
   }
+  // ---- copy + paste: where the next paste goes
+  // last = {game, x, y, w} the previous paste (or the copied original);
+  // ptr = the mouse over the table, moved = it moved since the last paste
+  const pst = { last: null, ptr: null, moved: false };
+  const STEP_MEEPLE = 50;
+  function doCopy(id) {
+    const o = findO(id);
+    if (!o || (o.kind !== Tiles.KIND && o.kind !== Meeples.KIND)) return false; // stacks: nothing
+    CLIP = { kind: o.kind, color: o.color, w: o.w, h: o.h };
+    pst.last = { game: st.item.id, x: o.x, y: o.y, w: o.kind === Tiles.KIND ? o.w : 0 }; pst.moved = false;
+    pulse(o.id, "gm-copied", 360);
+    const what = o.kind === Tiles.KIND ? `${colorName(o.color).toLowerCase()} tile ${o.w} x ${o.h}` : `${colorName(o.color).toLowerCase()} meeple`;
+    say(`Copied the ${what}. ${lastType === "mouse" ? "Ctrl+V pastes" : "Long-press the table to paste"}.`);
+    clearTimeout(pst.noteT); pst.noteT = setTimeout(() => { if (note.textContent.startsWith("Copied")) say(""); }, 2200);
+    return true;
+  }
+  /** one copy of the clipboard: centred on table point p, or (no p) by the rules above */
+  function doPaste(p) {
+    if (!st.item || !CLIP) return null;
+    const c = CLIP, tile = c.kind === Tiles.KIND, w = tile ? c.w : Meeples.W, hh = tile ? c.h : Meeples.H;
+    let x, y;
+    if (!p && pst.moved && pst.ptr) {
+      const r = board.getBoundingClientRect(), q = pst.ptr;
+      if (q.cx >= r.left && q.cx <= r.right && q.cy >= r.top && q.cy <= r.bottom) p = tablePt(q.cx, q.cy);
+    }
+    if (p) { x = p.x - w / 2; y = p.y - hh / 2; }
+    else if (pst.last && pst.last.game === st.item.id) { x = pst.last.x + (tile ? (pst.last.w || w) : STEP_MEEPLE); y = pst.last.y; }
+    else ({ x, y } = middle(w, hh));
+    const r = tile ? Tiles.addTile(table(), x, y, c.w, c.h, c.color) : Meeples.addMeeple(table(), x, y, c.color);
+    commit(r.state); pulse(r.id, "gm-land"); select(r.id);
+    const o = findO(r.id);
+    pst.last = { game: st.item.id, x: o.x, y: o.y, w: tile ? o.w : 0 }; pst.moved = false;
+    return r;
+  }
   function doFlip(id) { commit(Cards.flipStack(table(), needO(id).id)); pulse(id, "gm-flip", 260); }
   function doShuffle(id) { commit(Cards.shuffleStack(table(), needO(id).id)); pulse(id, "gm-shuf", 520); }
   /** Draw: the top card face up beside the deck, ready to drag */
@@ -428,7 +470,11 @@ export function mount(box, ctx) {
     ["Meeple", "A standing player piece; pick its colour in its menu", () => (p ? addMeepleAt(p.x - Meeples.W / 2, p.y - Meeples.H / 2) : addMeepleAt())],
     ["Tile", "A square to build boards and mats from: resize, colour, duplicate, lock", () => (p ? addTileAt(p.x - Tiles.SIZE / 2, p.y - Tiles.SIZE / 2) : addTileAt())],
   ];
-  function tableMenu(cx, cy) { openMenu(cx, cy, addItems(tablePt(cx, cy)), "Add to the table"); }
+  function tableMenu(cx, cy) {
+    const p = tablePt(cx, cy);
+    const paste = CLIP ? [["Paste", `Another ${CLIP.kind === Tiles.KIND ? "tile" : "meeple"} like the copied one, here`, () => doPaste(p)]] : [];
+    openMenu(cx, cy, [...paste, ...addItems(p)], "Add to the table");
+  }
   /** the + at the top right: the same choices, under the button */
   function addMenu() {
     const r = addBtn.getBoundingClientRect();
@@ -452,11 +498,13 @@ export function mount(box, ctx) {
     return [row, ["Custom colour…", "Any colour, from the colour picker", custom]];
   }
   function meepleMenu(o, cx, cy) {
-    openMenu(cx, cy, [...colorItems(o, cx, cy), ["Duplicate", "Another meeple of this colour beside it", () => doDuplicate(o.id)]], `${colorName(o.color)} meeple`);
+    openMenu(cx, cy, [...colorItems(o, cx, cy), ["Duplicate", "Another meeple of this colour beside it", () => doDuplicate(o.id)],
+      ["Copy", "Copy it; paste copies with Ctrl+V or from the table's menu", () => doCopy(o.id)]], `${colorName(o.color)} meeple`);
   }
   function tileMenu(o, cx, cy) {
     openMenu(cx, cy, [...colorItems(o, cx, cy),
       ["Duplicate", "A copy directly to its right, same size and colour", () => doDuplicate(o.id)],
+      ["Copy", "Copy it; paste copies with Ctrl+V or from the table's menu", () => doCopy(o.id)],
       o.locked ? ["Unlock", "Let the tile move and resize again", () => doLock(o.id, false)]
         : ["Lock", "Keep it in place: drags on it pan the table", () => doLock(o.id, true)]],
       `${colorName(o.color)} tile, ${o.w} x ${o.h}${o.locked ? ", locked" : ""}`);
@@ -469,6 +517,21 @@ export function mount(box, ctx) {
   }
   document.addEventListener("pointerdown", e => { if (!menu.hidden && !menu.contains(e.target)) closeMenu(); }, true);
   document.addEventListener("keydown", e => { if (e.key === "Escape" && !menu.hidden) { closeMenu(); e.stopPropagation(); } }, true);
+  const typing = t => !!t?.closest?.("input, textarea, select, [contenteditable]:not([contenteditable=false])");
+  document.addEventListener("keydown", e => {
+    if (!st.item || board.hidden || !board.getClientRects().length || ctx.levels.current() !== ME) return;
+    if (typing(e.target) || typing(document.activeElement)) return; // the chat field keeps its copy + paste
+    if (e.key === "Escape" && menu.hidden && st.sel) { select(""); return; }
+    if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+    const k = e.key.toLowerCase();
+    if (k === "c") {
+      if (String(window.getSelection?.() || "")) return; // selected page text copies as usual
+      if (st.sel && doCopy(st.sel)) e.preventDefault();
+    } else if (k === "v" && CLIP) {
+      e.preventDefault();
+      try { doPaste(); } catch (err) { say(err.message, true); }
+    }
+  });
 
   // ------------------------------------------------------------ gestures
   // presses on a stack: drag (move or draw), hold (menu), double tap (flip);
@@ -498,6 +561,7 @@ export function mount(box, ctx) {
     const through = hit && hit.kind === Tiles.KIND && hit.locked ? hit : null;
     if (hit && !through && !drag && !pans.size) {
       const o = hit;
+      if (o.kind === Cards.KIND) select(""); // stacks are not copied: the selection goes
       board.setPointerCapture(e.pointerId);
       const p = tablePt(e.clientX, e.clientY);
       drag = { id: o.id, kind: o.kind, pid: e.pointerId, sx: e.clientX, sy: e.clientY, mode: "", off: { x: p.x - o.x, y: p.y - o.y }, p0: p,
@@ -537,7 +601,7 @@ export function mount(box, ctx) {
           drag.mode = "move";
           data().objects = objs().filter(q => q.id !== o.id).concat(o); draw(); // lifted to the top
         }
-        if (drag.kind === Tiles.KIND) select(drag.id);
+        if (drag.kind === Tiles.KIND || drag.kind === Meeples.KIND) select(drag.id);
         st.els.get(drag.id)?.classList.add("gm-drag");
       }
       const p = tablePt(e.clientX, e.clientY), o = findO(drag.id), el = st.els.get(drag.id);
@@ -576,7 +640,7 @@ export function mount(box, ctx) {
     el?.classList.remove("gm-drag");
     if (!d.mode) {
       if (d.held || cancelled) return;
-      if (d.kind === Tiles.KIND) { select(d.id); return; } // a tap selects a tile: its resize handle shows
+      if (d.kind === Tiles.KIND || d.kind === Meeples.KIND) { select(d.id); return; } // a tap selects a piece (a tile shows its resize handle)
       if (d.kind !== Cards.KIND) return;
       // a tap; a second tap (or click) on the same stack soon after flips it.
       // (no dblclick listener: with the pointer captured it targets the table)
@@ -619,6 +683,9 @@ export function mount(box, ctx) {
     const r = board.getBoundingClientRect();
     zoomAt(st.view.z * Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0018)), e.clientX - r.left, e.clientY - r.top);
   }, { passive: false });
+  // where the mouse is, for Ctrl+V at the pointer
+  board.addEventListener("pointermove", e => { if (e.pointerType === "mouse") { pst.ptr = { cx: e.clientX, cy: e.clientY }; pst.moved = true; } });
+  board.addEventListener("pointerleave", e => { if (e.pointerType === "mouse") pst.ptr = null; });
   // mouse presses remember their type for the contextmenu check
   board.addEventListener("pointerdown", e => { lastType = e.pointerType; }, true);
 

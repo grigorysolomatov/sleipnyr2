@@ -93,6 +93,9 @@
 }
 .gm-tile.gm-drag { cursor: grabbing; will-change: transform; }
 .gm-tile.gm-sel { outline: 2px solid var(--accent-here); outline-offset: -2px; }
+.gm-meeple.gm-sel { outline: 2px solid var(--accent-here); outline-offset: 2px; border-radius: 6px; }
+.gm-meeple.gm-copied, .gm-tile.gm-copied { animation: gm-copied 360ms var(--gm-ease); }
+@keyframes gm-copied { 50% { opacity: .55; } }
 .gm-tile.gm-locked { cursor: inherit; }
 .gm-handle {
   position: absolute; right: 0; bottom: 0; width: 22px; height: 22px; cursor: nwse-resize; display: none;
