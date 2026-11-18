@@ -8,24 +8,44 @@
 //
 // A game is an endless table: drag empty space (or one finger on a phone) to
 // pan, the wheel (or two fingers) to zoom. On it lie objects drawn by table
-// components (web/components/*.js); the first component is a poker card set:
+// components (web/components/*.js): poker card sets, meeples and tiles.
+// The + at the top right (and a right-click / long-press on empty table)
+// offers them: Poker deck, Meeple, Tile. Tiles lie at the bottom, cards on
+// them, meeples on top. Cards:
 //   drag a card or a stack         moves it (a deck: drag its TOP CARD off = draw one card)
 //   drag a deck's count badge      moves the whole deck (desktop: also Shift + drag)
 //   drop on a stack of the same set   merges (the dropped cards go on top); another set refuses
 //   double-click / double-tap      flips the card or the stack
 //   right-click / long-press       menu at the object: Flip, Draw, Shuffle, Gather;
-//                                  on empty table: Add poker deck
+//                                  on empty table: add a poker deck, meeple or tile
+// meeples: drag to move; menu = colour swatches, Custom colour, Duplicate
+// tiles: drag to move (snapped to a 10 px grid), the bottom-right handle resizes
+//   (desktop: on hover; phone: tap the tile first); menu = colour, Duplicate
+//   (the copy goes right beside it), Lock (a locked tile stays put: drags on it pan)
 //
 // Saved item (kernel /k/items), one per game:
 //   game {title, chatView, sets: [{id, kind, x, y}], objects: [{id, kind, x, y, ...}]}
 //     objects in drawing order (the last one on top); the component named by
-//     kind draws it and owns its fields (stack: set, cards [{c, up}], bottom first)
+//     kind draws it and owns its fields (stack: set, cards [{c, up}], bottom first;
+//     meeple: color; tile: w, h, color, locked); drawn by layer, then this order
 // The view (pan, zoom) is kept per device. Saves are short-delayed PATCHes of
 // the bare body; another device's newer copy is taken when nothing is pending.
 import { itemList } from "/web/itemlist.js";
 import { CHAT_FIRST, ONE_SENTENCE, runs } from "/web/hcp.js";
 import { backButton } from "/web/head.js";
 import * as Cards from "./components/cards.js";
+import * as Meeples from "./components/meeples.js";
+import * as Tiles from "./components/tiles.js";
+import { PALETTE, colorName, parseColor, setColor } from "./components/colors.js";
+
+// the table components by object kind: element class, drawing, size, layer (higher = on top)
+const KINDS = {
+  [Cards.KIND]: { cls: "gm-stack", render: Cards.renderStack, size: () => [Cards.W, Cards.H], layer: 1 },
+  [Meeples.KIND]: { cls: "gm-meeple", render: Meeples.render, size: () => [Meeples.W, Meeples.H], layer: Meeples.LAYER },
+  [Tiles.KIND]: { cls: "gm-tile", render: Tiles.render, size: o => [o.w, o.h], layer: Tiles.LAYER },
+};
+const kindOf = o => KINDS[o.kind] || KINDS[Cards.KIND];
+const sizeOf = o => kindOf(o).size(o);
 
 const ME = "games";
 const LIST_VIEW = "games-list";
@@ -55,37 +75,44 @@ const ease = t => 1 - Math.pow(1 - t, 3);
 
 export function mount(box, ctx) {
   const WHO = ctx.user?.name || "the user", AG = ctx.app?.agentName || "the agent";
-  const st = { item: null, list: [], last: localStorage.getItem(LAST_KEY) || "", els: new Map(), saveTimer: 0, savedAt: 0, view: { x: 40, y: 40, z: 1 } };
+  const st = { item: null, list: [], last: localStorage.getItem(LAST_KEY) || "", els: new Map(), sel: "", saveTimer: 0, savedAt: 0, view: { x: 40, y: 40, z: 1 } };
   box.classList.add("gm-level");
   const back = backButton({ cls: "gm-back", onclick: () => (st.item ? ctx.levels.go(ME, "") : ctx.levels.up()) });
   const titleEl = h("b", { class: "gm-title" }, "Games");
   const zoomEl = h("button", { class: "gm-zoom", type: "button", "data-tip": "Zoom; tap to fit the table", "aria-label": "Fit the table", onclick: () => fitAll(), hidden: true });
-  const addBtn = icon(PLUS, "New game", () => (st.item ? addDeckAt() : newGame()), "gm-add");
+  const addBtn = icon(PLUS, "New game", () => (st.item ? addMenu() : newGame()), "gm-add");
   const head = h("header", { class: "gm-bar" }, back, titleEl, zoomEl, addBtn);
   const games = itemList({ word: "game", agent: AG, href: it => `/m/${ME}/${encodeURIComponent(it.id)}`, open: it => ctx.levels.go(ME, it.id),
     title: it => it.data.title || "Untitled game", summary: it => gameSummary(it),
     archive: async (it, on) => { await patchGame(it.id, { hidden: on ? true : null }); drawList(); } });
   const dots = h("canvas", { class: "gm-dots", "aria-hidden": "true" });
   const plane = h("div", { class: "gm-plane" });
-  const hint = h("p", { class: "gm-hint", hidden: true }, "Empty table. Right-click or long-press it to add a poker deck (or use + above).");
+  const hint = h("p", { class: "gm-hint", hidden: true }, "Empty table. Use + above, or right-click / long-press the table, to add a poker deck, a meeple or a tile.");
   const board = h("div", { class: "gm-board", hidden: true, "data-k-id": "table", "data-k-kind": "table",
     "data-k-label": "The table: drag empty space to pan, wheel or pinch to zoom" }, dots, plane, hint);
   const menu = h("div", { class: "gm-menu k-pop", role: "menu", hidden: true });
   const note = h("p", { class: "gm-note", "aria-live": "polite", hidden: true });
-  box.append(head, games.el, board, note, menu);
+  // the Custom colour picker: the browser's own, opened from the menu
+  const picker = h("input", { type: "color", class: "gm-picker", tabindex: "-1", "aria-hidden": "true" });
+  box.append(head, games.el, board, note, menu, picker);
   const say = (t, err = false) => { note.hidden = !t; note.textContent = t || ""; note.classList.toggle("err", err); };
 
   // ------------------------------------------------------------ data
   const data = () => st.item?.data;
   const objs = () => data()?.objects || [];
   const findO = id => objs().find(o => o.id === id);
-  const needO = id => { const o = findO(String(id || "").trim()); if (!o) throw new Error(`no stack ${id}`); return o; };
+  const needO = id => { const o = findO(String(id || "").trim()); if (!o) throw new Error(`no object ${id}`); return o; };
   const table = () => ({ sets: data().sets || [], objects: objs() });
   /** apply a pure table operation's result and save */
   function commit(state) { data().sets = state.sets; data().objects = state.objects; draw(); save(); }
   const gameSummary = it => {
-    const os = (it.data.objects || []).filter(o => o.kind === Cards.KIND), n = os.reduce((s, o) => s + o.cards.length, 0);
-    return os.length ? `${os.length} stack${os.length === 1 ? "" : "s"}, ${n} card${n === 1 ? "" : "s"}` : "empty table";
+    const all = it.data.objects || [], os = all.filter(o => o.kind === Cards.KIND), n = os.reduce((s, o) => s + o.cards.length, 0);
+    const pl = (k, w) => `${k} ${w}${k === 1 ? "" : "s"}`, parts = [];
+    if (os.length) parts.push(pl(os.length, "stack"), pl(n, "card"));
+    const m = all.filter(o => o.kind === Meeples.KIND).length, t = all.filter(o => o.kind === Tiles.KIND).length;
+    if (m) parts.push(pl(m, "meeple"));
+    if (t) parts.push(pl(t, "tile"));
+    return parts.join(", ") || "empty table";
   };
 
   async function saveOnce() {
@@ -141,7 +168,7 @@ export function mount(box, ctx) {
     titleEl.classList.toggle("gm-ren", !!it);
     if (it) titleEl.dataset.tip = "Tap to rename"; else delete titleEl.dataset.tip;
     titleEl.onclick = it ? () => { const t = prompt("Game name", data().title || ""); if (t !== null) rename(t); } : null;
-    const bt = it ? "All games" : "All modalities", at = it ? "Add a poker deck" : "New game";
+    const bt = it ? "All games" : "All modalities", at = it ? "Add to the table: poker deck, meeple, tile" : "New game";
     back.dataset.tip = bt; back.setAttribute("aria-label", bt);
     addBtn.dataset.tip = at; addBtn.setAttribute("aria-label", at);
     zoomEl.hidden = !it;
@@ -210,23 +237,24 @@ export function mount(box, ctx) {
     const os = objs(), r = board.getBoundingClientRect();
     if (!os.length) return glideView({ x: 40, y: 40, z: 1 });
     const pad = 32, x0 = Math.min(...os.map(o => o.x)), y0 = Math.min(...os.map(o => o.y));
-    const x1 = Math.max(...os.map(o => o.x + Cards.W)), y1 = Math.max(...os.map(o => o.y + Cards.H));
+    const x1 = Math.max(...os.map(o => o.x + sizeOf(o)[0])), y1 = Math.max(...os.map(o => o.y + sizeOf(o)[1]));
     const z = clamp(Math.min((r.width - 2 * pad) / (x1 - x0), (r.height - 2 * pad) / (y1 - y0)), ZMIN, 1.5);
     glideView({ z, x: (r.width - (x1 - x0) * z) / 2 - x0 * z, y: (r.height - (y1 - y0) * z) / 2 - y0 * z });
   }
   function centreOn(o) {
     const r = board.getBoundingClientRect(), z = st.view.z;
-    glideView({ z, x: r.width / 2 - (o.x + Cards.W / 2) * z, y: r.height / 2 - (o.y + Cards.H / 2) * z });
+    const [w, hh] = sizeOf(o);
+    glideView({ z, x: r.width / 2 - (o.x + w / 2) * z, y: r.height / 2 - (o.y + hh / 2) * z });
   }
   /** a screen point as a table point */
   function tablePt(cx, cy) {
     const r = board.getBoundingClientRect(), v = st.view;
     return { x: (cx - r.left - v.x) / v.z, y: (cy - r.top - v.y) / v.z };
   }
-  /** the table point at the middle of the screen, for a new deck */
-  function middle() {
+  /** the top left of a w x h piece centred on the screen, for a new piece */
+  function middle(w = Cards.W, hh = Cards.H) {
     const r = board.getBoundingClientRect(), p = tablePt(r.left + r.width / 2, r.top + r.height / 2);
-    return { x: p.x - Cards.W / 2, y: p.y - Cards.H / 2 };
+    return { x: p.x - w / 2, y: p.y - hh / 2 };
   }
 
   // ------------------------------------------------------------ drawing
@@ -235,16 +263,25 @@ export function mount(box, ctx) {
     const ids = new Set(objs().map(o => o.id));
     for (const [id, el] of st.els) if (!ids.has(id)) { el.remove(); st.els.delete(id); }
     for (const o of objs()) {
+      const K = kindOf(o);
       let el = st.els.get(o.id);
-      if (!el) { el = h("div", { class: "gm-stack", "data-k-kind": "stack" }); el.dataset.id = o.id; el.dataset.kId = o.id; st.els.set(o.id, el); }
-      Cards.renderStack(el, o);
+      if (el && el.dataset.kind !== o.kind) { el.remove(); el = null; }
+      if (!el) { el = h("div", { class: `gm-obj ${K.cls}`, "data-k-kind": o.kind }); el.dataset.id = o.id; el.dataset.kId = o.id; el.dataset.kind = o.kind; st.els.set(o.id, el); }
+      K.render(el, o);
       el.dataset.kLabel += ` at ${Math.round(o.x)} ${Math.round(o.y)}`;
+      el.classList.toggle("gm-sel", st.sel === o.id);
       if (drag?.id !== o.id) { el.style.left = `${o.x}px`; el.style.top = `${o.y}px`; }
-      if (el.parentNode !== plane || el !== plane.children[[...objs()].indexOf(o)]) plane.append(el);
     }
-    // drawing order = the objects' order (the last on top)
-    objs().forEach((o, i) => { const el = st.els.get(o.id); if (plane.children[i] !== el) plane.insertBefore(el, plane.children[i] || null); });
+    // drawing order = by layer (tiles, cards, meeples), then the objects' order (the last on top)
+    const order = objs().map((o, i) => [o, i]).sort((a, b) => kindOf(a[0]).layer - kindOf(b[0]).layer || a[1] - b[1]);
+    order.forEach(([o], i) => { const el = st.els.get(o.id); if (plane.children[i] !== el) plane.insertBefore(el, plane.children[i] || null); });
     hint.hidden = objs().length > 0;
+  }
+  function select(id) {
+    if (st.sel === id) return;
+    st.els.get(st.sel)?.classList.remove("gm-sel");
+    st.sel = id || "";
+    st.els.get(st.sel)?.classList.add("gm-sel");
   }
   /** play a CSS animation class once on a stack */
   function pulse(id, cls, ms = 420) {
@@ -273,6 +310,43 @@ export function mount(box, ctx) {
     const r = Cards.addDeck(table(), p.x, p.y);
     commit(r.state); pulse(r.stack, "gm-land");
     return r;
+  }
+  function addMeepleAt(x, y, c) {
+    if (!st.item) return null;
+    const p = x === undefined ? middle(Meeples.W, Meeples.H) : { x, y };
+    const r = Meeples.addMeeple(table(), p.x, p.y, c);
+    commit(r.state); pulse(r.id, "gm-land");
+    return r;
+  }
+  function addTileAt(x, y, w, hh, c) {
+    if (!st.item) return null;
+    w ??= Tiles.SIZE; hh ??= Tiles.SIZE;
+    const p = x === undefined ? middle(w, hh) : { x, y };
+    const r = Tiles.addTile(table(), p.x, p.y, w, hh, c);
+    commit(r.state); pulse(r.id, "gm-land"); select(r.id);
+    return r;
+  }
+  function doColor(id, c) {
+    const o = needO(id), v = parseColor(c);
+    if (!v) throw new Error(`not a colour: ${c}`);
+    commit(setColor(table(), o.id, v));
+  }
+  function doDuplicate(id) {
+    const o = needO(id);
+    const r = o.kind === Tiles.KIND ? Tiles.duplicate(table(), o.id) : o.kind === Meeples.KIND ? Meeples.duplicate(table(), o.id) : null;
+    if (!r) throw new Error(`only meeples and tiles duplicate (${id} is a ${o.kind})`);
+    commit(r.state); pulse(r.id, "gm-land");
+    if (o.kind === Tiles.KIND) select(r.id);
+    return r;
+  }
+  function doResize(id, w, hh) {
+    const o = needO(id); if (o.kind !== Tiles.KIND) throw new Error(`${id} is not a tile`);
+    commit(Tiles.resize(table(), o.id, w, hh));
+  }
+  function doLock(id, on) {
+    const o = needO(id); if (o.kind !== Tiles.KIND) throw new Error(`${id} is not a tile`);
+    if (on && st.sel === o.id) select("");
+    commit(Tiles.setLocked(table(), o.id, on));
   }
   function doFlip(id) { commit(Cards.flipStack(table(), needO(id).id)); pulse(id, "gm-flip", 260); }
   function doShuffle(id) { commit(Cards.shuffleStack(table(), needO(id).id)); pulse(id, "gm-shuf", 520); }
@@ -308,6 +382,7 @@ export function mount(box, ctx) {
   }
   function doMove(id, x, y) {
     const o = needO(id), was = spots();
+    if (o.kind === Tiles.KIND) { x = Tiles.snap(x); y = Tiles.snap(y); }
     commit(Cards.moveTo(table(), o.id, x, y)); glideFrom(was);
   }
   /** a dropped stack onto another: merge within one set, else a bounce and it lands beside */
@@ -325,15 +400,15 @@ export function mount(box, ctx) {
   // ------------------------------------------------------------ the menu (right-click / long-press)
   let openedAt = 0, byHold = false;
   function closeMenu() { menu.hidden = true; menu.replaceChildren(); }
-  function openMenu(cx, cy, items, heading) {
+  // the lifting finger of a long-press is not a choice
+  const early = () => byHold && performance.now() - openedAt < 350;
+  const choose = fn => () => { if (early()) return; closeMenu(); try { fn(); } catch (e) { say(e.message, true); } };
+  /** items: [label, tip, fn] rows, or ready elements (the colour swatches) */
+  function openMenu(cx, cy, items, heading, hold = lastType !== "mouse") {
     menu.replaceChildren(
-      heading ? h("div", { class: "gm-menu-h" }, heading) : null,
-      ...items.map(([label, tip, fn]) => h("button", { class: "k-pop-i", type: "button", role: "menuitem", "data-tip": tip,
-        onclick: () => {
-          if (byHold && performance.now() - openedAt < 350) return; // the lifting finger of a long-press is not a choice
-          closeMenu(); try { fn(); } catch (e) { say(e.message, true); }
-        } }, label)));
-    menu.hidden = false; openedAt = performance.now(); byHold = lastType !== "mouse";
+      ...(heading ? [h("div", { class: "gm-menu-h" }, heading)] : []),
+      ...items.map(it => (it instanceof Element ? it : h("button", { class: "k-pop-i", type: "button", role: "menuitem", "data-tip": it[1], onclick: choose(it[2]) }, it[0]))));
+    menu.hidden = false; openedAt = performance.now(); byHold = hold;
     const r = box.getBoundingClientRect(), mw = menu.offsetWidth, mh = menu.offsetHeight;
     menu.style.left = `${clamp(cx - r.left, 4, r.width - mw - 4)}px`;
     menu.style.top = `${clamp(cy - r.top, 4, r.height - mh - 4)}px`;
@@ -347,9 +422,50 @@ export function mount(box, ctx) {
     items.push(["Gather", `Every card of this deck back here: one full ordered deck, face down`, () => doGather(o.set)]);
     openMenu(cx, cy, items, n > 1 ? `${n} cards` : t.up ? Cards.cardLong(t.c) : "Card, face down");
   }
-  function tableMenu(cx, cy) {
-    const p = tablePt(cx, cy);
-    openMenu(cx, cy, [["Add poker deck", "A new 52-card deck here, face down", () => addDeckAt(p.x - Cards.W / 2, p.y - Cards.H / 2)]]);
+  /** what can be added: at a table point, or (no point) the middle of the screen */
+  const addItems = p => [
+    ["Poker deck", "A new 52-card deck, face down", () => (p ? addDeckAt(p.x - Cards.W / 2, p.y - Cards.H / 2) : addDeckAt())],
+    ["Meeple", "A standing player piece; pick its colour in its menu", () => (p ? addMeepleAt(p.x - Meeples.W / 2, p.y - Meeples.H / 2) : addMeepleAt())],
+    ["Tile", "A square to build boards and mats from: resize, colour, duplicate, lock", () => (p ? addTileAt(p.x - Tiles.SIZE / 2, p.y - Tiles.SIZE / 2) : addTileAt())],
+  ];
+  function tableMenu(cx, cy) { openMenu(cx, cy, addItems(tablePt(cx, cy)), "Add to the table"); }
+  /** the + at the top right: the same choices, under the button */
+  function addMenu() {
+    const r = addBtn.getBoundingClientRect();
+    openMenu(r.right, r.bottom + 4, addItems(null), "Add to the table", false);
+    const m = menu.getBoundingClientRect(), b = box.getBoundingClientRect();
+    menu.style.left = `${clamp(r.right - b.left - m.width, 4, b.width - m.width - 4)}px`;
+  }
+  /** the colour swatches + Custom colour, for meeples and tiles */
+  function colorItems(o, cx, cy) {
+    const row = h("div", { class: "gm-sws", role: "group", "aria-label": "Colour" },
+      PALETTE.map(p => h("button", { class: `gm-sw${o.color === p.hex ? " on" : ""}`, type: "button", style: `--sw:${p.hex}`, "data-tip": p.name, "aria-label": p.name,
+        onclick: choose(() => doColor(o.id, p.hex)) })));
+    const custom = () => {
+      const r = box.getBoundingClientRect();
+      picker.style.left = `${clamp(cx - r.left, 0, r.width - 2)}px`; picker.style.top = `${clamp(cy - r.top, 0, r.height - 2)}px`;
+      picker.value = o.color;
+      picker.oninput = () => { try { doColor(o.id, picker.value); } catch (e) { say(e.message, true); } };
+      picker.onchange = picker.oninput;
+      picker.click();
+    };
+    return [row, ["Custom colour…", "Any colour, from the colour picker", custom]];
+  }
+  function meepleMenu(o, cx, cy) {
+    openMenu(cx, cy, [...colorItems(o, cx, cy), ["Duplicate", "Another meeple of this colour beside it", () => doDuplicate(o.id)]], `${colorName(o.color)} meeple`);
+  }
+  function tileMenu(o, cx, cy) {
+    openMenu(cx, cy, [...colorItems(o, cx, cy),
+      ["Duplicate", "A copy directly to its right, same size and colour", () => doDuplicate(o.id)],
+      o.locked ? ["Unlock", "Let the tile move and resize again", () => doLock(o.id, false)]
+        : ["Lock", "Keep it in place: drags on it pan the table", () => doLock(o.id, true)]],
+      `${colorName(o.color)} tile, ${o.w} x ${o.h}${o.locked ? ", locked" : ""}`);
+  }
+  function objMenu(id, cx, cy) {
+    const o = findO(id); if (!o) return;
+    if (o.kind === Meeples.KIND) return meepleMenu(o, cx, cy);
+    if (o.kind === Tiles.KIND) return tileMenu(o, cx, cy);
+    return stackMenu(id, cx, cy);
   }
   document.addEventListener("pointerdown", e => { if (!menu.hidden && !menu.contains(e.target)) closeMenu(); }, true);
   document.addEventListener("keydown", e => { if (e.key === "Escape" && !menu.hidden) { closeMenu(); e.stopPropagation(); } }, true);
@@ -360,12 +476,12 @@ export function mount(box, ctx) {
   let drag = null;            // the stack being pressed or dragged
   const pans = new Map();     // pointer id -> last point, presses on empty table
   let pinch = null, lastType = "mouse", lastTap = { id: "", t: 0 };
-  const stackAt = e => e.target.closest?.(".gm-stack");
+  const objAt = e => e.target.closest?.(".gm-obj");
   function hitStack(p, skip) {
     const os = objs();
     for (let i = os.length - 1; i >= 0; i--) {
       const o = os[i];
-      if (o.id !== skip && p.x >= o.x && p.x <= o.x + Cards.W && p.y >= o.y && p.y <= o.y + Cards.H) return o;
+      if (o.kind === Cards.KIND && o.id !== skip && p.x >= o.x && p.x <= o.x + Cards.W && p.y >= o.y && p.y <= o.y + Cards.H) return o;
     }
     return null;
   }
@@ -377,18 +493,21 @@ export function mount(box, ctx) {
     if (!st.item || (e.pointerType === "mouse" && e.button !== 0)) return;
     lastType = e.pointerType;
     cancelAnimationFrame(viewGlide);
-    const sEl = stackAt(e);
-    if (sEl && !drag && !pans.size) {
-      const o = findO(sEl.dataset.id); if (!o) return;
+    const oEl = objAt(e), hit = oEl && findO(oEl.dataset.id);
+    // a locked tile passes the press through to the table (pan), keeping only its menu
+    const through = hit && hit.kind === Tiles.KIND && hit.locked ? hit : null;
+    if (hit && !through && !drag && !pans.size) {
+      const o = hit;
       board.setPointerCapture(e.pointerId);
       const p = tablePt(e.clientX, e.clientY);
-      drag = { id: o.id, from: o.id, pid: e.pointerId, sx: e.clientX, sy: e.clientY, mode: "", off: { x: p.x - o.x, y: p.y - o.y },
-        whole: !!e.target.closest(".gm-badge") || e.shiftKey, timer: 0, held: false };
-      if (e.pointerType !== "mouse") drag.timer = setTimeout(() => { if (drag && !drag.mode) { drag.held = true; stackMenu(drag.id, drag.sx, drag.sy); } }, HOLD);
+      drag = { id: o.id, kind: o.kind, pid: e.pointerId, sx: e.clientX, sy: e.clientY, mode: "", off: { x: p.x - o.x, y: p.y - o.y }, p0: p,
+        whole: !!e.target.closest(".gm-badge") || e.shiftKey, resize: o.kind === Tiles.KIND && !!e.target.closest(".gm-handle"), w0: o.w, h0: o.h, timer: 0, held: false };
+      if (e.pointerType !== "mouse") drag.timer = setTimeout(() => { if (drag && !drag.mode) { drag.held = true; objMenu(drag.id, drag.sx, drag.sy); } }, HOLD);
       e.preventDefault();
       return;
     }
     if (drag) return;
+    if (!through && pans.size === 0) select("");
     board.setPointerCapture(e.pointerId);
     pans.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY });
     if (pans.size === 2) {
@@ -397,7 +516,7 @@ export function mount(box, ctx) {
       pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, z: st.view.z };
     } else if (e.pointerType !== "mouse") {
       const cx = e.clientX, cy = e.clientY;
-      tableHold = setTimeout(() => { const q = pans.get(e.pointerId); if (q && pans.size === 1 && Math.hypot(q.x - q.sx, q.y - q.sy) < SLOP) tableMenu(cx, cy); }, HOLD);
+      tableHold = setTimeout(() => { const q = pans.get(e.pointerId); if (q && pans.size === 1 && Math.hypot(q.x - q.sx, q.y - q.sy) < SLOP) (through ? objMenu(through.id, cx, cy) : tableMenu(cx, cy)); }, HOLD);
     }
     board.classList.add("panning"); moving();
   });
@@ -408,7 +527,8 @@ export function mount(box, ctx) {
         if (Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < SLOP || drag.held) return;
         clearTimeout(drag.timer); closeMenu();
         const o = findO(drag.id);
-        if (o.cards.length > 1 && !drag.whole) {
+        if (drag.resize) drag.mode = "resize";
+        else if (o.kind === Cards.KIND && o.cards.length > 1 && !drag.whole) {
           // dragging a deck's top card off draws it
           const r = Cards.take(table(), o.id, 1, o.x, o.y);
           data().sets = r.state.sets; data().objects = r.state.objects; draw();
@@ -417,13 +537,20 @@ export function mount(box, ctx) {
           drag.mode = "move";
           data().objects = objs().filter(q => q.id !== o.id).concat(o); draw(); // lifted to the top
         }
+        if (drag.kind === Tiles.KIND) select(drag.id);
         st.els.get(drag.id)?.classList.add("gm-drag");
       }
       const p = tablePt(e.clientX, e.clientY), o = findO(drag.id), el = st.els.get(drag.id);
+      if (drag.mode === "resize") {
+        // the handle follows the pointer; the size snaps to the grid
+        drag.w = Tiles.side(drag.w0 + p.x - drag.p0.x); drag.h = Tiles.side(drag.h0 + p.y - drag.p0.y);
+        if (el) { el.style.width = `${drag.w}px`; el.style.height = `${drag.h}px`; }
+        return;
+      }
       drag.x = p.x - drag.off.x; drag.y = p.y - drag.off.y;
+      if (o.kind === Tiles.KIND) { drag.x = Tiles.snap(drag.x); drag.y = Tiles.snap(drag.y); } // tiles butt edge to edge
       if (el) el.style.transform = `translate(${drag.x - o.x}px, ${drag.y - o.y}px)`;
-      const t = hitStack(p, drag.id);
-      markTarget(t, t && t.set === o.set);
+      if (o.kind === Cards.KIND) { const t = hitStack(p, drag.id); markTarget(t, t && t.set === o.set); }
       return;
     }
     const q = pans.get(e.pointerId); if (!q) return;
@@ -449,6 +576,8 @@ export function mount(box, ctx) {
     el?.classList.remove("gm-drag");
     if (!d.mode) {
       if (d.held || cancelled) return;
+      if (d.kind === Tiles.KIND) { select(d.id); return; } // a tap selects a tile: its resize handle shows
+      if (d.kind !== Cards.KIND) return;
       // a tap; a second tap (or click) on the same stack soon after flips it.
       // (no dblclick listener: with the pointer captured it targets the table)
       const now = performance.now();
@@ -458,8 +587,12 @@ export function mount(box, ctx) {
     }
     if (el) el.style.transform = "";
     const o = findO(d.id);
+    if (d.mode === "resize") {
+      if (!cancelled && d.w !== undefined) { o.w = d.w; o.h = d.h; }
+      draw(); save(); return;
+    }
     if (cancelled || d.x === undefined) { draw(); save(); return; }
-    const t = hitStack(tablePt(e.clientX, e.clientY), d.id);
+    const t = o.kind === Cards.KIND ? hitStack(tablePt(e.clientX, e.clientY), d.id) : null;
     o.x = Math.round(d.x); o.y = Math.round(d.y);
     if (el) { el.style.left = `${o.x}px`; el.style.top = `${o.y}px`; }
     if (t) dropOnto(d.id, t.id); else { draw(); save(); }
@@ -476,8 +609,8 @@ export function mount(box, ctx) {
   board.addEventListener("contextmenu", e => {
     e.preventDefault();
     if (!st.item || lastType !== "mouse") return; // touch: the hold timers open the menu
-    const s = stackAt(e);
-    if (s) stackMenu(s.dataset.id, e.clientX, e.clientY); else tableMenu(e.clientX, e.clientY);
+    const s = objAt(e);
+    if (s) objMenu(s.dataset.id, e.clientX, e.clientY); else tableMenu(e.clientX, e.clientY);
   });
   board.addEventListener("wheel", e => {
     if (!st.item) return;
@@ -503,16 +636,23 @@ export function mount(box, ctx) {
     if (!st.item) return describeList();
     const sets = (data().sets || []).map(s => `- ${s.id} | ${s.kind} deck | home at ${s.x} ${s.y} | ${objs().filter(o => o.set === s.id).reduce((n, o) => n + o.cards.length, 0)} of 52 cards in ${objs().filter(o => o.set === s.id).length} stack(s)`).join("\n");
     const os = objs().filter(o => o.kind === Cards.KIND).map(o => `- ${Cards.describeStack(o)}`).join("\n");
+    const ms = objs().filter(o => o.kind === Meeples.KIND).map(o => `- ${Meeples.describe(o)}`).join("\n");
+    const ts = objs().filter(o => o.kind === Tiles.KIND).map(o => `- ${Tiles.describe(o)}`).join("\n");
     const r = board.getBoundingClientRect(), a = tablePt(r.left, r.top), b = tablePt(r.right, r.bottom);
     return `[Sent from the Sleipnyr Games table "${(data().title || "").replace(/"/g, "'")}" (${st.item.id}): ${WHO}'s tabletop for game prototypes. `
       + `Objects lie at table coordinates (px, x right, y down; a card is ${Cards.W} x ${Cards.H}); the screen shows ${Math.round(a.x)} ${Math.round(a.y)} to ${Math.round(b.x)} ${Math.round(b.y)}`
       + `${matchMedia("(max-width: 760px)").matches ? " (the user is on a phone)" : ""}.\n`
       + `Cards: poker sets of 52 (no jokers); every card belongs to the set (deck) it came from, and only stacks of one set merge. A stack lists its cards bottom first; its top card shows. `
       + `${WHO} sees face-up cards only; never reveal face-down cards (you are not shown them).\n`
+      + `Meeples (${Meeples.W} x ${Meeples.H} standing player pieces) lie on top of everything; tiles (plain coloured rectangles, default ${Tiles.SIZE} x ${Tiles.SIZE}, position and size on a ${Tiles.SNAP} px grid) lie beneath everything, to build boards, grids and player mats from; a locked tile does not move. `
+      + `Colours: ${PALETTE.map(p => p.name).join(", ")} or #rrggbb.\n`
       + `Sets:\n${sets || "(none)"}\nStacks (id | set | cards | position):\n${os || "(none)"}\n`
+      + `Meeples (id | colour | position):\n${ms || "(none)"}\nTiles (id | colour | size | position | locked):\n${ts || "(none)"}\n`
       + `This chat is this game's own history; the table acts on your reply (other games are not affected). ${CHAT_FIRST}, exactly:\n`
       + `@add-deck [x y]   (a new full deck, face down; default = the middle of the screen)\n@shuffle <stack id>\n@draw <stack id> [n]   (n cards, each face up beside the stack)\n`
-      + `@flip <stack id>   (a whole stack turns over: order reverses)\n@move <stack id> <x> <y>\n@merge <stack id> <onto stack id>   (same set only; dropped cards go on top)\n`
+      + `@flip <stack id>   (a whole stack turns over: order reverses)\n@move <stack, meeple or tile id> <x> <y>   (top left corner)\n`
+      + `@add-meeple [x y] [colour]\n@add-tile [x y] [w h] [colour]   (a 3 x 3 board = nine 100 x 100 tiles stepped 100 px)\n`
+      + `@color <meeple or tile id> <colour>\n@resize <tile id> <w> <h>\n@duplicate <meeple or tile id>   (a tile's copy goes directly to its right)\n@lock <tile id>\n@unlock <tile id>\n@merge <stack id> <onto stack id>   (same set only; dropped cards go on top)\n`
       + `@gather <set id or stack id>   (every card of that set back into one full ordered deck, face down, at its home)\n@focus <stack id>   (centre the view on it)\n@fit   (show the whole table)\n`
       + `@rename <title>   (this game's name)\n@back   (to the game list)\n${runs("table")} Never delete anything.]`;
   };
@@ -535,6 +675,21 @@ export function mount(box, ctx) {
       case "flip": doFlip(w[0]); return `flip ${w[0]}`;
       case "draw": { const made = doDraw(w[0], w[1] ? num(w[1]) : 1); return `draw ${w[0]} -> ${made.join(" ")}`; }
       case "move": doMove(w[0], num(w[1]), num(w[2])); return `move ${w[0]}`;
+      case "add-meeple": case "add-tile": {
+        // numbers first (x y, then w h for a tile), then an optional colour
+        const n = [], rest = [];
+        for (const t of w) (rest.length || !Number.isFinite(Number(t)) ? rest : n).push(t);
+        const c = rest.length ? rest.join(" ") : undefined;
+        if (c !== undefined && !parseColor(c)) throw new Error(`not a colour: ${c}`);
+        const xy = n.length >= 2 ? [n[0], n[1]].map(Number) : [undefined, undefined];
+        const r = name === "add-meeple" ? addMeepleAt(xy[0], xy[1], c)
+          : addTileAt(xy[0], xy[1], n.length >= 4 ? Number(n[2]) : undefined, n.length >= 4 ? Number(n[3]) : undefined, c);
+        return `${name} ${r.id}`;
+      }
+      case "color": case "colour": doColor(w[0], w.slice(1).join(" ")); return `color ${w[0]}`;
+      case "resize": doResize(w[0], num(w[1]), num(w[2])); return `resize ${w[0]}`;
+      case "duplicate": { const r = doDuplicate(w[0]); return `duplicate ${w[0]} -> ${r.id}`; }
+      case "lock": case "unlock": doLock(w[0], name === "lock"); return `${name} ${w[0]}`;
       case "merge": { needO(w[0]); needO(w[1]); if (!dropOnto(w[0], w[1])) throw new Error("different sets: not merged"); return `merge ${w[0]} onto ${w[1]}`; }
       case "gather": { const r = doGather(w[0]); return `gather -> ${r.stack}`; }
       case "focus": centreOn(needO(w[0])); return `focus ${w[0]}`;
@@ -555,7 +710,7 @@ export function mount(box, ctx) {
   // ------------------------------------------------------------ level + live updates
   let chat = null;
   ctx.bar.offer({ id: ME, label: () => (st.item ? data().title || "Game" : "Games"), shown: () => !!box.getClientRects().length,
-    placeholder: () => (st.item ? "Ask the table: deal, shuffle, flip, gather" : "Ask the games: open, start or rename one"),
+    placeholder: () => (st.item ? "Ask the table: deal, shuffle, add meeples or tiles" : "Ask the games: open, start or rename one"),
     send: b => { if (!chat) throw new Error("no conversation here"); return chat.send(b); } });
   const embed = (view, title) => { chat = ctx.embed(view, box, { title, from: ME, describe, run, scope: () => st.item?.id || "", ownThread: true }); };
   let showing = 0;
@@ -592,7 +747,7 @@ export function mount(box, ctx) {
   function clearTable() {
     clearTimeout(st.saveTimer); st.saveTimer = 0;
     st.els.forEach(el => el.remove()); st.els.clear();
-    st.item = null; drag = null; pans.clear(); pinch = null;
+    st.item = null; st.sel = ""; drag = null; pans.clear(); pinch = null;
   }
   ctx.actions?.view?.(ME, {
     scrollTo: id => { const o = st.item && findO(id); if (!o) return false; centreOn(o); return true; },

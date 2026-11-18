@@ -82,6 +82,34 @@
 .gm-pip { width: 14px; height: 14px; fill: currentColor; }
 .gm-mid { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
 .gm-big { width: 46px; height: 46px; fill: currentColor; }
+/* a meeple: the silhouette in its colour, on top of everything */
+.gm-meeple { position: absolute; width: 40px; height: 44px; cursor: grab; touch-action: none; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .55)); }
+.gm-meeple svg { display: block; width: 100%; height: 100%; }
+.gm-meeple.gm-drag { z-index: 5; cursor: grabbing; will-change: transform; }
+/* a tile: a plain coloured rectangle beneath everything; handle = resize */
+.gm-tile {
+  position: absolute; cursor: grab; touch-action: none; background: var(--gm-tile, #9e9e9e);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gm-tile-ink) 35%, transparent);
+}
+.gm-tile.gm-drag { cursor: grabbing; will-change: transform; }
+.gm-tile.gm-sel { outline: 2px solid var(--accent-here); outline-offset: -2px; }
+.gm-tile.gm-locked { cursor: inherit; }
+.gm-handle {
+  position: absolute; right: 0; bottom: 0; width: 22px; height: 22px; cursor: nwse-resize; display: none;
+  background: linear-gradient(135deg, transparent 50%, var(--accent-here) 50%);
+}
+.gm-tile.gm-sel:not(.gm-locked) .gm-handle { display: block; }
+@media (hover: hover) { .gm-tile:not(.gm-locked):hover .gm-handle { display: block; } }
+.gm-meeple.glide, .gm-tile.glide { transition: transform var(--gm-glide) var(--gm-ease); }
+.gm-meeple.gm-land, .gm-tile.gm-land { animation: gm-land 380ms var(--gm-ease); }
+/* the colour row in a meeple's or tile's menu; Custom opens the hidden picker */
+.gm-sws { display: grid; grid-template-columns: repeat(6, 1.9rem); gap: .35rem; padding: .4rem .6rem .5rem; }
+.gm-sw {
+  width: 1.9rem; height: 1.9rem; padding: 0; border-radius: 50%; cursor: pointer; background: var(--sw);
+  border: 1px solid color-mix(in srgb, var(--text) 45%, transparent);
+}
+.gm-sw.on { outline: 2px solid var(--accent-here); outline-offset: 2px; }
+.gm-picker { position: absolute; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; pointer-events: none; }
 .gm-court { flex-direction: column; gap: 4px; }
 .gm-court b { font-size: 38px; line-height: 1; font-weight: 600; padding: 6px 12px 2px; border: 1px solid currentColor; border-radius: calc(var(--radius) - 2px); }
 .gm-cardback {
