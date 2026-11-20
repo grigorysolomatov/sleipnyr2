@@ -348,8 +348,19 @@ export async function mount(root, ctx) {
     await openThread(t.id, true);
   }
 
+  // Messages of recently opened threads, so switching back shows them at once
+  // (live events keep them current); a fresh read replaces them behind it.
+  const msgCache = new Map(); // thread id -> Map(id -> message), most recent last
+  const MSG_CACHE = 30;
+  function cacheMsgs(id, msgs) {
+    msgCache.delete(id); msgCache.set(id, msgs);
+    while (msgCache.size > MSG_CACHE) msgCache.delete(msgCache.keys().next().value);
+  }
+  let openSeq = 0; // the newest switch wins: an older, slower read never draws
+
   async function openThread(id, push) {
     st.animate = false; setTimeout(() => { st.animate = true; }, 600);
+    const seq = ++openSeq;
     st.open = id; st.live.clear(); st.fades.clear(); st.steps.clear(); setLast(id);
     if (push) ctx.go(id);
     const t = threadOf(id);
@@ -359,10 +370,21 @@ export async function mount(root, ctx) {
     shell.classList.add("thread-open");
     mb.focus("thread"); // opening a thread: the bar talks to it
     drawThreads();
-    const msgs = await ctx.api(`${API}/threads/${encodeURIComponent(id)}/messages`);
-    if (st.open !== id) return;
-    st.msgs = new Map(msgs.map(m => [m.id, m]));
+    // in the same frame as the title: this thread's known messages, or an
+    // empty log while they load; never the previous thread's
+    const known = msgCache.get(id);
+    st.msgs = known ? new Map(known) : new Map(); st.loading = !known; st.arrived = new Set();
     drawLog(true);
+    let msgs;
+    try { msgs = await ctx.api(`${API}/threads/${encodeURIComponent(id)}/messages`); }
+    catch (e) { if (seq === openSeq) { st.loading = false; drawLog(); } throw e; }
+    if (seq === openSeq) st.loading = false;
+    if (seq !== openSeq || st.open !== id) return;
+    const fresh = new Map(msgs.map(m => [m.id, m]));
+    // a live event that landed while the read was on its way is newer: keep it
+    for (const mid of st.arrived) { const m = st.msgs.get(mid); if (m && !(Number(fresh.get(mid)?.updated) >= Number(m.updated))) fresh.set(mid, m); }
+    st.msgs = fresh; cacheMsgs(id, fresh);
+    drawLog(!known || nearBottom());
   }
 
   // a thread with news nobody asked for (a notice's reply) is bold in the list until opened
@@ -404,8 +426,8 @@ export async function mount(root, ctx) {
     const stick = toBottom || nearBottom();
     const olds = new Map([...log.querySelectorAll(".c-msg")].map(e => [e.id, e]));
     log.replaceChildren(...[...st.msgs.values()].filter(m => !heldBack(m)).map(m => { const el = messageEl(m); keepPlayers(olds.get(m.id), el); return el; }));
-    if (!st.msgs.size) log.append(h("p", { class: "c-hello" }, st.open ? "New thread. Write, talk or paste a screenshot." : "Pick a thread or start a new one."));
-    if (!st.msgs.size && st.open) { const p = agentPicker(); if (p) log.append(p); }
+    if (!st.msgs.size && !st.loading) log.append(h("p", { class: "c-hello" }, st.open ? "New thread. Write, talk or paste a screenshot." : "Pick a thread or start a new one."));
+    if (!st.msgs.size && st.open && !st.loading) { const p = agentPicker(); if (p) log.append(p); }
     if (stick) log.scrollTop = logEnd();
     syncJump();
     for (const fn of drawHooks) try { fn(st.open); } catch (e) { console.error(e); }
@@ -605,8 +627,10 @@ export async function mount(root, ctx) {
     } else if (item.type === "message") {
       if (pills.has(item.id)) pillUpdate(item);
       if (st.hist && item.data.thread === st.hist.id) try { histMessage(item); } catch (e) { console.error(e); }
+      const cached = msgCache.get(item.data.thread);
+      if (cached && cached !== st.msgs) cached.set(item.id, item);
       if (item.data.thread !== st.open) return;
-      st.msgs.set(item.id, item);
+      st.msgs.set(item.id, item); st.arrived?.add(item.id);
       if (["done", "error", "stopped", "cancelled"].includes(item.data.status)) { st.live.delete(item.id); st.steps.delete(item.id); }
       redrawMessage(item.id);
     }

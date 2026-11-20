@@ -385,7 +385,21 @@ export async function createApp(config: Config) {
     return json({ error: "not found" }, 404);
   };
 
+  // JSON answers go gzipped when the client takes it: a long thread's messages
+  // are ~0.5 MB of JSON (~10x smaller zipped), which a phone connection felt
+  // as seconds before the thread appeared.
+  const GZIP_MIN = 2048;
   const fetch = async (req: Request): Promise<Response> => {
+    const res = await route(req);
+    if (!/\bgzip\b/.test(req.headers.get("accept-encoding") || "") || res.headers.has("content-encoding")
+      || !(res.headers.get("content-type") || "").startsWith("application/json")) return res;
+    const body = new Uint8Array(await res.arrayBuffer());
+    if (body.length < GZIP_MIN) return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
+    const headers = new Headers(res.headers);
+    headers.set("content-encoding", "gzip"); headers.delete("content-length"); headers.append("vary", "accept-encoding");
+    return new Response(Bun.gzipSync(body), { status: res.status, statusText: res.statusText, headers });
+  };
+  const route = async (req: Request): Promise<Response> => {
     const url = new URL(req.url), parts = url.pathname.split("/").filter(Boolean);
     try {
       if (parts[0] === "k") return await kernelApi(req, parts.slice(1), url);
