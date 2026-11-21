@@ -311,8 +311,10 @@ class Chat {
     const done = prev.data.actionsDone;
     if (!done || done[0] === "running")
       return `[Your previous reply's actions did not run (the view was not on screen): ${prev.data.actions.map(a => `@${a.name} ${a.args}`.trim()).join("; ").slice(0, 400)}. Send them again if still wanted.]\n\n`;
-    if (!done.some(d => d.startsWith("failed"))) return "";
-    return `[Your previous reply's actions: ${done.join("; ").slice(0, 600)}]\n\n`;
+    // "[for you]" = an answer meant for the agent (e.g. games @list-cards): always passed on, longer
+    const told = done.some(d => d.includes("[for you]"));
+    if (!told && !done.some(d => d.startsWith("failed"))) return "";
+    return `[Your previous reply's actions: ${done.join("; ").slice(0, told ? 8000 : 600)}]\n\n`;
   }
 
   private idsNote(t: Item<Thread>, userId: string, replyId: string): string {

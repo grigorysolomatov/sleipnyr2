@@ -106,14 +106,15 @@ export function flipStack(st, id) {
   o.cards = flipped(o.cards);
   return s;
 }
-/** Gather: every card of a set back into one full, ordered, face-down deck at the set's home. */
-export function gather(st, setId) {
+/** Gather: every card of a set back into one full, ordered, face-down deck at the set's home.
+ *  fresh(set) = that full deck (default: the 52 poker cards; text decks pass their own). */
+export function gather(st, setId, fresh = freshCards) {
   const s = clone(st), set = (s.sets || []).find(q => q.id === setId);
   if (!set) throw new Error(`no set ${setId}`);
   const mine = s.objects.filter(q => q.kind === KIND && q.set === setId);
   const keep = mine.find(q => q.x === set.x && q.y === set.y) || mine[0];
   const o = keep ? { ...keep } : { id: nextId("s", s.objects), kind: KIND, set: setId };
-  Object.assign(o, { x: set.x, y: set.y, cards: freshCards() });
+  Object.assign(o, { x: set.x, y: set.y, cards: fresh(set) });
   s.objects = s.objects.filter(q => !(q.kind === KIND && q.set === setId)).concat(o);
   return { state: s, stack: o.id, from: mine.length };
 }

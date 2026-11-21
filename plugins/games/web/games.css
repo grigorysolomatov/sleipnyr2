@@ -143,6 +143,36 @@
   position: absolute; inset: 10px; border: 1px solid color-mix(in srgb, var(--accent-here) 55%, transparent); border-radius: calc(var(--radius) - 3px);
 }
 
+/* a text card: title on top, wrapped text below; long texts shrink a step, the rest fades out */
+.gm-tface { display: flex; flex-direction: column; gap: 4px; padding: 7px 7px 14px; color: var(--text); text-align: left; --gm-tt: 12px; --gm-tx: 10.5px; }
+.gm-tface.gm-t2 { --gm-tt: 11px; --gm-tx: 9.5px; }
+.gm-tface.gm-t3 { --gm-tt: 10px; --gm-tx: 8.5px; }
+.gm-tface.gm-t4 { --gm-tt: 9.5px; --gm-tx: 7.5px; }
+.gm-ttitle { flex: none; font-size: var(--gm-tt); font-weight: 700; line-height: 1.15; overflow-wrap: anywhere; color: var(--accent-here); }
+.gm-ttext {
+  flex: 1; min-height: 0; margin: 0; overflow: hidden; font-size: var(--gm-tx); line-height: 1.25; white-space: pre-wrap; overflow-wrap: anywhere;
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 12px), transparent);
+}
+.gm-tnum { position: absolute; right: 6px; bottom: 3px; font-size: 9px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.gm-tname {
+  position: absolute; inset: 14px; display: flex; align-items: center; justify-content: center; text-align: center;
+  font-size: 13px; font-weight: 700; line-height: 1.2; overflow-wrap: anywhere; overflow: hidden; color: var(--text);
+}
+.gm-tslot { background: transparent; border: 1px dashed var(--text-muted); }
+.gm-tslot .gm-tname { color: var(--text-muted); bottom: 40px; }
+.gm-tsub { position: absolute; left: 0; right: 0; bottom: 30px; text-align: center; font-size: 10px; color: var(--text-muted); }
+.gm-stack.gm-empty { box-shadow: none; }
+/* Edit text / Add card / Rename deck: the form inside the menu */
+.gm-form { display: flex; flex-direction: column; gap: .4rem; padding: .2rem .6rem .5rem; width: min(18rem, calc(100vw - 3rem)); }
+.gm-in {
+  box-sizing: border-box; width: 100%; font: inherit; font-size: .95em; color: var(--text); background: var(--bg);
+  border: 1px solid var(--line); border-radius: var(--radius); padding: .4rem .5rem;
+}
+.gm-in:focus { outline: 1px solid var(--accent-here); border-color: var(--accent-here); }
+.gm-ta { resize: vertical; min-height: 6rem; line-height: 1.35; }
+.gm-form-row { display: flex; justify-content: flex-end; gap: .3rem; }
+.gm-save { color: var(--accent-here); }
+
 /* the menu at an object (right-click / long-press): the shared .k-pop look */
 .gm-menu-h { margin: .35rem .7rem .2rem; color: var(--text-muted); font-size: .8em; }
 /* ? : the desktop keys sheet, top right of the game */

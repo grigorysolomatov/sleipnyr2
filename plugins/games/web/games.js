@@ -19,6 +19,11 @@
 //   right-click / long-press       menu at the object: Flip, Draw, Shuffle, Gather;
 //                                  on empty table: add a poker deck, meeple or tile
 // meeples: drag to move; menu = colour swatches, Custom colour, Duplicate
+// text decks (custom cards, e.g. Events): a named set of {title, text} cards,
+//   written by hand (menu Add card / Edit text / Rename deck) or by the agent
+//   (@add-text-deck, @add-card, @edit-card, @rename-set, @list-cards); they
+//   draw, flip, shuffle, merge (own set only) and gather like poker cards; a
+//   deck with no cards yet shows an empty slot at its home
 // dice: drag to move; double-click / double-tap, menu Roll or R (over the die,
 //   or the selected dice) rolls with a short tumble; menu = Roll, Set value,
 //   colour, Duplicate, Copy (dice select, copy, delete and nudge like meeples)
@@ -53,7 +58,8 @@
 // Saved item (kernel /k/items), one per game:
 //   game {title, chatView, sets: [{id, kind, x, y}], objects: [{id, kind, x, y, ...}]}
 //     objects in drawing order (the last one on top); the component named by
-//     kind draws it and owns its fields (stack: set, cards [{c, up}], bottom first;
+//     kind draws it and owns its fields (stack: set, cards [{c, up}] or, in a
+//     text set {kind: "text", name, cards: [{title, text}]}, [{n, up}], bottom first;
 //     meeple: color; die: sides, value, color, rolls; tile: w, h, color, locked); drawn by layer, then this order
 // The view (pan, zoom) is kept per device. Saves are short-delayed PATCHes of
 // the bare body; another device's newer copy is taken when nothing is pending.
@@ -64,6 +70,7 @@ import * as Cards from "./components/cards.js";
 import * as Meeples from "./components/meeples.js";
 import * as Tiles from "./components/tiles.js";
 import * as Dice from "./components/dice.js";
+import * as Text from "./components/textcards.js";
 import { PALETTE, colorName, parseColor, setColor } from "./components/colors.js";
 import * as Table from "./components/table.js";
 
@@ -122,7 +129,7 @@ export function mount(box, ctx) {
     archive: async (it, on) => { await patchGame(it.id, { hidden: on ? true : null }); drawList(); } });
   const dots = h("canvas", { class: "gm-dots", "aria-hidden": "true" });
   const plane = h("div", { class: "gm-plane" });
-  const hint = h("p", { class: "gm-hint", hidden: true }, "Empty table. Use + above, or right-click / long-press the table, to add a poker deck, a meeple, a die or a tile.");
+  const hint = h("p", { class: "gm-hint", hidden: true }, "Empty table. Use + above, or right-click / long-press the table, to add a poker deck, a text deck, a meeple, a die or a tile.");
   const board = h("div", { class: "gm-board", hidden: true, "data-k-id": "table", "data-k-kind": "table",
     "data-k-label": "The table: middle-drag (phone: one finger) pans, left-drag selects, wheel or pinch zooms" }, dots, plane, hint);
   const menu = h("div", { class: "gm-menu k-pop", role: "menu", hidden: true });
@@ -146,6 +153,11 @@ export function mount(box, ctx) {
   const findO = id => objs().find(o => o.id === id);
   const needO = id => { const o = findO(String(id || "").trim()); if (!o) throw new Error(`no object ${id}`); return o; };
   const table = () => ({ sets: data().sets || [], objects: objs() });
+  const setOf = o => (data()?.sets || []).find(s => s.id === o?.set);
+  /** the text set a stack belongs to, or null (a poker stack) */
+  const textOf = o => { const s = setOf(o); return Text.isText(s) ? s : null; };
+  const findSet = id => (data()?.sets || []).find(s => s.id === id);
+  const needText = id => { const s = (data()?.sets || []).find(q => q.id === String(id || "").trim()); if (!Text.isText(s)) throw new Error(`no text deck ${id}`); return s; };
   /** apply a pure table operation's result and save */
   function commit(state, tag = "") { data().sets = state.sets; data().objects = state.objects; draw(); save(false, tag); }
   // ---- undo: every save records the table; undo / redo put an older one back
@@ -326,7 +338,9 @@ export function mount(box, ctx) {
       let el = st.els.get(o.id);
       if (el && el.dataset.kind !== o.kind) { el.remove(); el = null; }
       if (!el) { el = h("div", { class: `gm-obj ${K.cls}`, "data-k-kind": o.kind }); el.dataset.id = o.id; el.dataset.kId = o.id; el.dataset.kind = o.kind; st.els.set(o.id, el); }
-      K.render(el, o);
+      const ts = o.kind === Cards.KIND ? textOf(o) : null;
+      if (ts) Text.renderStack(el, o, ts); else K.render(el, o);
+      el.classList.toggle("gm-tstack", !!ts);
       el.dataset.kLabel += ` at ${Math.round(o.x)} ${Math.round(o.y)}`;
       el.classList.toggle("gm-sel", st.sel.has(o.id));
       if (drag?.id !== o.id) { el.style.left = `${o.x}px`; el.style.top = `${o.y}px`; }
@@ -386,6 +400,20 @@ export function mount(box, ctx) {
     commit(r.state); pulse(r.stack, "gm-land");
     return r;
   }
+  function addTextDeckAt(x, y, name) {
+    if (!st.item) return null;
+    const p = x === undefined ? middle() : { x, y };
+    const r = Text.addTextDeck(table(), p.x, p.y, name);
+    commit(r.state); pulse(r.stack, "gm-land");
+    return r;
+  }
+  function doAddCard(setId, title, text) {
+    const r = Text.addCard(table(), setId, title, text);
+    commit(r.state); pulse(r.stack, "gm-land");
+    return r;
+  }
+  const doEditCard = (setId, n, title, text) => commit(Text.editCard(table(), setId, n, title, text));
+  const doRenameSet = (setId, name) => commit(Text.renameSet(table(), setId, name));
   function addMeepleAt(x, y, c) {
     if (!st.item) return null;
     const p = x === undefined ? middle(Meeples.W, Meeples.H) : { x, y };
@@ -608,7 +636,8 @@ export function mount(box, ctx) {
     ref = String(ref || "").trim();
     const set = (data().sets || []).find(s => s.id === ref) ? ref : findO(ref)?.set;
     if (!set) throw new Error(`no set or stack ${ref}`);
-    const was = spots(), r = Cards.gather(table(), set);
+    const ts = Text.isText((data().sets || []).find(s => s.id === set));
+    const was = spots(), r = ts ? Cards.gather(table(), set, Text.freshCards) : Cards.gather(table(), set);
     // the gathered stacks fly to the deck's home before they disappear into it
     const home = r.state.sets.find(s => s.id === set);
     for (const o of objs()) if (o.set === set && o.id !== r.stack) {
@@ -651,8 +680,42 @@ export function mount(box, ctx) {
     menu.style.left = `${clamp(cx - r.left, 4, r.width - mw - 4)}px`;
     menu.style.top = `${clamp(cy - r.top, 4, r.height - mh - 4)}px`;
   }
+  /** a small form in the menu: a title line and a text box (a text card), or one line (a deck's name) */
+  function cardForm(cx, cy, heading, vals, onSave, textBox = true) {
+    const t = h("input", { class: "gm-in", type: "text", maxlength: String(textBox ? Text.MAX_TITLE : Text.MAX_NAME), placeholder: textBox ? "Title" : "Name", "aria-label": textBox ? "Title" : "Name" });
+    t.value = vals.title || "";
+    const x = textBox ? h("textarea", { class: "gm-in gm-ta", rows: "5", maxlength: String(Text.MAX_TEXT), placeholder: "Text", "aria-label": "Text" }) : null;
+    if (x) x.value = vals.text || "";
+    const ok = () => { try { onSave(t.value, x ? x.value : ""); closeMenu(); } catch (e) { say(e.message, true); } };
+    const key = e => { if (e.key === "Enter" && (e.target === t || e.ctrlKey || e.metaKey)) { e.preventDefault(); ok(); } };
+    t.addEventListener("keydown", key); x?.addEventListener("keydown", key);
+    const form = h("div", { class: "gm-form" }, t, x,
+      h("div", { class: "gm-form-row" },
+        h("button", { class: "k-pop-i", type: "button", "data-tip": "Close without saving  (Esc)", onclick: () => closeMenu() }, "Cancel"),
+        h("button", { class: "k-pop-i gm-save", type: "button", "data-tip": textBox ? "Save the card; Undo takes it back  (Ctrl+Enter)" : "Save the name  (Enter)", onclick: ok }, "Save")));
+    openMenu(cx, cy, [form], heading, false);
+    setTimeout(() => t.focus(), 30);
+  }
+  /** a text deck's stack (or its empty slot): the card actions plus Add card, Edit text, Rename deck */
+  function textMenu(o, set, cx, cy) {
+    const n = o.cards.length, t = Cards.topCard(o), items = [];
+    if (n) items.push([n > 1 ? "Flip stack" : "Flip", n > 1 ? "Turn the whole stack over (its order reverses)  (F)" : "Turn the card over  (F)", () => doFlip(o.id)]);
+    if (n > 1) items.push(["Draw", "Put the top card face up beside the deck  (D)", () => doDraw(o.id)], ["Shuffle", "Shuffle this stack  (S)", () => doShuffle(o.id)]);
+    if (n) {
+      const c = Text.cardOf(set, t);
+      items.push(["Edit text", `Change the title and text of card ${t.n}${t.up ? "" : " (the top card, face down)"}`,
+        () => cardForm(cx, cy, `${set.name}: card ${t.n}`, c, (a, b) => doEditCard(set.id, t.n, a, b))]);
+    }
+    items.push(["Add card", `A new card for ${set.name}, face down at the bottom of the deck at its home`,
+      () => cardForm(cx, cy, `${set.name}: new card ${set.cards.length + 1}`, {}, (a, b) => doAddCard(set.id, a, b))]);
+    items.push(["Rename deck", "The name on the backs of its cards", () => cardForm(cx, cy, "Deck name", { title: set.name }, a => doRenameSet(set.id, a), false)]);
+    if (set.cards.length) items.push(["Gather", `Every card of this deck back here: the full deck in order, face down  (G)`, () => doGather(o.set)]);
+    const c = n ? Text.cardOf(set, t) : null;
+    openMenu(cx, cy, items, !n ? `${set.name}: no cards yet` : n > 1 ? `${set.name}: ${n} cards` : t.up ? `${set.name} ${t.n}: ${c.title || "card"}` : `${set.name} card, face down`);
+  }
   function stackMenu(id, cx, cy) {
     const o = findO(id); if (!o) return;
+    const ts = textOf(o); if (ts) return textMenu(o, ts, cx, cy);
     const n = o.cards.length, t = Cards.topCard(o);
     const items = [[n > 1 ? "Flip stack" : "Flip", n > 1 ? "Turn the whole stack over (its order reverses)  (F)" : "Turn the card over  (F)", () => doFlip(id)]];
     if (n > 1) items.push(["Draw", "Put the top card face up beside the deck  (D)", () => doDraw(id)]);
@@ -664,6 +727,7 @@ export function mount(box, ctx) {
   const addItems = p => [
     ["Poker deck", "A new 52-card deck, face down", () => (p ? addDeckAt(p.x - Cards.W / 2, p.y - Cards.H / 2) : addDeckAt())],
     ["Meeple", "A standing player piece; pick its colour in its menu", () => (p ? addMeepleAt(p.x - Meeples.W / 2, p.y - Meeples.H / 2) : addMeepleAt())],
+    [Text.TITLE, `Your own cards with a title and text (a deck named ${Text.DEFAULT_NAME}, no cards yet): add them from its menu`, () => (p ? addTextDeckAt(p.x - Cards.W / 2, p.y - Cards.H / 2) : addTextDeckAt())],
     [Dice.TITLE, "A six-sided die: double-click / double-tap or R rolls it; pick its colour in its menu", () => (p ? addDieAt(p.x - Dice.W / 2, p.y - Dice.H / 2) : addDieAt())],
     ["Tile", "A square to build boards and mats from: resize, colour, duplicate, lock", () => (p ? addTileAt(p.x - Tiles.SIZE / 2, p.y - Tiles.SIZE / 2) : addTileAt())],
   ];
@@ -1045,8 +1109,9 @@ export function mount(box, ctx) {
   };
   const describe = async () => {
     if (!st.item) return describeList();
-    const sets = (data().sets || []).map(s => `- ${s.id} | ${s.kind} deck | home at ${s.x} ${s.y} | ${objs().filter(o => o.set === s.id).reduce((n, o) => n + o.cards.length, 0)} of 52 cards in ${objs().filter(o => o.set === s.id).length} stack(s)`).join("\n");
-    const os = objs().filter(o => o.kind === Cards.KIND).map(o => `- ${Cards.describeStack(o)}`).join("\n");
+    const sets = (data().sets || []).map(s => (Text.isText(s) ? `- ${Text.describeSet(s, objs())}`
+      : `- ${s.id} | ${s.kind} deck | home at ${s.x} ${s.y} | ${objs().filter(o => o.set === s.id).reduce((n, o) => n + o.cards.length, 0)} of 52 cards in ${objs().filter(o => o.set === s.id).length} stack(s)`)).join("\n");
+    const os = objs().filter(o => o.kind === Cards.KIND).map(o => { const ts = textOf(o); return `- ${ts ? Text.describeStack(o, ts) : Cards.describeStack(o)}`; }).join("\n");
     const ms = objs().filter(o => o.kind === Meeples.KIND).map(o => `- ${Meeples.describe(o)}`).join("\n");
     const ts = objs().filter(o => o.kind === Tiles.KIND).map(o => `- ${Tiles.describe(o)}`).join("\n");
     const ks = objs().filter(o => o.kind === Dice.KIND).map(o => `- ${Dice.describe(o)}`).join("\n");
@@ -1056,6 +1121,9 @@ export function mount(box, ctx) {
       + `${matchMedia("(max-width: 760px)").matches ? " (the user is on a phone)" : ""}.\n`
       + `Cards: poker sets of 52 (no jokers); every card belongs to the set (deck) it came from, and only stacks of one set merge. A stack lists its cards bottom first; its top card shows. `
       + `${WHO} sees face-up cards only; never reveal face-down cards (you are not shown them).\n`
+      + `Text decks: ${WHO}'s own cards for this prototype (e.g. Events), each card = a title and a text, numbered 1, 2, ... in its set for good (cards are never removed). `
+      + `${WHO} dictates card texts and you write them with @add-card / @edit-card; a face-up text card shows as n: "title". `
+      + `To see what a deck's cards say (you wrote them), send @list-cards <set id>: the answer comes in your next context; never read face-down cards out to ${WHO}.\n`
       + `Meeples (${Meeples.W} x ${Meeples.H} standing player pieces) and dice (${Dice.W} x ${Dice.H}, six-sided; a roll is fair and random, done by the table, never chosen by you) lie on top of everything; tiles (plain coloured rectangles, default ${Tiles.SIZE} x ${Tiles.SIZE}, position and size on a ${Tiles.SNAP} px grid) lie beneath everything, to build boards, grids and player mats from; a locked tile does not move. `
       + `Colours: ${PALETTE.map(p => p.name).join(", ")} or #rrggbb.\n`
       + `Sets:\n${sets || "(none)"}\nStacks (id | set | cards | position):\n${os || "(none)"}\n`
@@ -1066,7 +1134,11 @@ export function mount(box, ctx) {
       + `@flip <stack id>   (a whole stack turns over: order reverses)\n@move <stack, meeple, die or tile id> <x> <y>   (top left corner)\n`
       + `@add-meeple [x y] [colour]\n@add-die [x y] [colour]   (a six-sided die showing 1)\n@roll <die id ...|all>   (roll dice; the results are in the next context)\n@set-die <die id> <1-6>   (turn a die to a face by hand)\n@add-tile [x y] [w h] [colour]   (a 3 x 3 board = nine 100 x 100 tiles stepped 100 px)\n`
       + `@color <meeple, die or tile id> <colour>\n@resize <tile id> <w> <h>\n@duplicate <meeple, die or tile id>   (a tile's copy goes directly to its right)\n@lock <tile id>\n@unlock <tile id>\n@merge <stack id> <onto stack id>   (same set only; dropped cards go on top)\n`
-      + `@gather <set id or stack id>   (every card of that set back into one full ordered deck, face down, at its home)\n@focus <stack id>   (centre the view on it)\n@fit   (show the whole table)\n`
+      + `@gather <set id or stack id>   (every card of that set back into one full ordered deck, face down, at its home)\n`
+      + `@add-text-deck [x y] [name]   (a new text deck with no cards yet, default name ${Text.DEFAULT_NAME}; the answer gives its set id)\n`
+      + `@add-card <set id> <title> | <text>   (one new card, face down at the bottom of the deck at its home; the answer gives its number)\n`
+      + `@edit-card <set id> <n> <title> | <text>   (card n gets this title and text, wherever it lies)\n@rename-set <set id> <name>   (the name on the backs)\n`
+      + `@list-cards <set id>   (every card's number, title and text, for you only; in your next context)\n@focus <stack id>   (centre the view on it)\n@fit   (show the whole table)\n`
       + `@rename <title>   (this game's name)\n@back   (to the game list)\n${runs("table")} Never delete anything.]`;
   };
   async function runList(name, args) {
@@ -1112,6 +1184,21 @@ export function mount(box, ctx) {
       case "lock": case "unlock": doLock(w[0], name === "lock"); return `${name} ${w[0]}`;
       case "merge": { needO(w[0]); needO(w[1]); if (!dropOnto(w[0], w[1])) throw new Error("different sets: not merged"); return `merge ${w[0]} onto ${w[1]}`; }
       case "gather": { const r = doGather(w[0]); return `gather -> ${r.stack}`; }
+      case "add-text-deck": {
+        const xy = w.length >= 2 && Number.isFinite(Number(w[0])) && Number.isFinite(Number(w[1]));
+        const r = xy ? addTextDeckAt(num(w[0]), num(w[1]), w.slice(2).join(" ") || undefined) : addTextDeckAt(undefined, undefined, a || undefined);
+        return `add-text-deck ${r.set} "${findSet(r.set).name}" (empty slot ${r.stack})`;
+      }
+      case "add-card": {
+        const set = needText(w[0]), [t, ...x] = a.slice(w[0].length).split("|");
+        const r = doAddCard(set.id, t, x.join("|")); return `add-card ${set.id} -> card ${r.n} in ${r.stack}`;
+      }
+      case "edit-card": {
+        const set = needText(w[0]), n = num(w[1]), [t, ...x] = a.slice(a.indexOf(w[1], w[0].length) + w[1].length).split("|");
+        doEditCard(set.id, n, t, x.join("|")); return `edit-card ${set.id} ${n}`;
+      }
+      case "rename-set": { const set = needText(w[0]); doRenameSet(set.id, a.slice(w[0].length)); return `rename-set ${set.id} "${findSet(set.id).name}"`; }
+      case "list-cards": return Text.listCards(needText(w[0]));
       case "focus": centreOn(needO(w[0])); return `focus ${w[0]}`;
       case "fit": fitAll(); return "fit";
       case "rename": case "rename-game": rename(a); return "rename";
@@ -1123,6 +1210,7 @@ export function mount(box, ctx) {
     if (!st.item) return runList(name, args);
     const r = run1(name, args);
     if (name === "gather") await new Promise(ok => setTimeout(ok, GLIDE + 20));
+    if (name === "list-cards") return r; // nothing changed
     if (st.item && !(await save(true))) throw new Error(`not saved (${r})`);
     return r;
   };
@@ -1130,7 +1218,7 @@ export function mount(box, ctx) {
   // ------------------------------------------------------------ level + live updates
   let chat = null;
   ctx.bar.offer({ id: ME, label: () => (st.item ? data().title || "Game" : "Games"), shown: () => !!box.getClientRects().length,
-    placeholder: () => (st.item ? "Ask the table: deal, shuffle, roll, add pieces" : "Ask the games: open, start or rename one"),
+    placeholder: () => (st.item ? "Ask the table: deal, shuffle, roll, write cards" : "Ask the games: open, start or rename one"),
     send: b => { if (!chat) throw new Error("no conversation here"); return chat.send(b); } });
   const embed = (view, title) => { chat = ctx.embed(view, box, { title, from: ME, describe, run, scope: () => st.item?.id || "", ownThread: true }); };
   let showing = 0;
