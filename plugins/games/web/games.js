@@ -8,10 +8,10 @@
 //
 // A game is an endless table: middle-drag (or one finger on a phone) pans,
 // a left drag on empty space draws a selection box; the wheel (or two fingers) to zoom. On it lie objects drawn by table
-// components (web/components/*.js): poker card sets, meeples, dice and tiles.
+// components (web/components/*.js): poker card sets, meeples, dice, tokens and tiles.
 // The + at the top right (and a right-click / long-press on empty table)
-// offers them: Poker deck, Meeple, D6 die, Tile. Tiles lie at the bottom,
-// cards on them, meeples and dice on top. Cards:
+// offers them: Poker deck, Meeple, D6 die, Token (a shape), Tile. Tiles lie at
+// the bottom, cards on them, meeples, dice and tokens on top. Cards:
 //   drag a card or a stack         moves it (a deck: drag its TOP CARD off = draw one card)
 //   drag a deck's count badge      moves the whole deck (desktop: also Shift + drag)
 //   drop on a stack of the same set   merges (the dropped cards go on top); another set refuses
@@ -27,6 +27,8 @@
 // dice: drag to move; double-click / double-tap, menu Roll or R (over the die,
 //   or the selected dice) rolls with a short tumble; menu = Roll, Set value,
 //   colour, Duplicate, Copy (dice select, copy, delete and nudge like meeples)
+// tokens: flat shapes (poop, disc, cube, star, heart); menu = Shape, colour,
+//   Eyes (poop), Duplicate, Copy; otherwise like meeples
 // tiles: drag to move (snapped to a 10 px grid), the bottom-right handle resizes
 //   (desktop: on hover; phone: tap the tile first); menu = colour, Duplicate
 //   (the copy goes right beside it), Lock (a locked tile stays put: drags on it pan)
@@ -60,7 +62,7 @@
 //     objects in drawing order (the last one on top); the component named by
 //     kind draws it and owns its fields (stack: set, cards [{c, up}] or, in a
 //     text set {kind: "text", name, cards: [{title, text}]}, [{n, up}], bottom first;
-//     meeple: color; die: sides, value, color, rolls; tile: w, h, color, locked); drawn by layer, then this order
+//     meeple: color; die: sides, value, color, rolls; token: shape, color, eyes; tile: w, h, color, locked); drawn by layer, then this order
 // The view (pan, zoom) is kept per device. Saves are short-delayed PATCHes of
 // the bare body; another device's newer copy is taken when nothing is pending.
 import { itemList } from "/web/itemlist.js";
@@ -70,6 +72,7 @@ import * as Cards from "./components/cards.js";
 import * as Meeples from "./components/meeples.js";
 import * as Tiles from "./components/tiles.js";
 import * as Dice from "./components/dice.js";
+import * as Tokens from "./components/tokens.js";
 import * as Text from "./components/textcards.js";
 import { PALETTE, colorName, parseColor, setColor } from "./components/colors.js";
 import * as Table from "./components/table.js";
@@ -80,6 +83,7 @@ const KINDS = {
   [Meeples.KIND]: { cls: "gm-meeple", render: Meeples.render, size: () => [Meeples.W, Meeples.H], layer: Meeples.LAYER },
   [Tiles.KIND]: { cls: "gm-tile", render: Tiles.render, size: o => [o.w, o.h], layer: Tiles.LAYER },
   [Dice.KIND]: { cls: "gm-die", render: Dice.render, size: () => [Dice.W, Dice.H], layer: Dice.LAYER },
+  [Tokens.KIND]: { cls: "gm-token", render: Tokens.render, size: () => [Tokens.W, Tokens.H], layer: Tokens.LAYER },
 };
 const kindOf = o => KINDS[o.kind] || KINDS[Cards.KIND];
 const sizeOf = o => kindOf(o).size(o);
@@ -129,7 +133,7 @@ export function mount(box, ctx) {
     archive: async (it, on) => { await patchGame(it.id, { hidden: on ? true : null }); drawList(); } });
   const dots = h("canvas", { class: "gm-dots", "aria-hidden": "true" });
   const plane = h("div", { class: "gm-plane" });
-  const hint = h("p", { class: "gm-hint", hidden: true }, "Empty table. Use + above, or right-click / long-press the table, to add a poker deck, a text deck, a meeple, a die or a tile.");
+  const hint = h("p", { class: "gm-hint", hidden: true }, "Empty table. Use + above, or right-click / long-press the table, to add a poker deck, a text deck, a meeple, a die, a token or a tile.");
   const board = h("div", { class: "gm-board", hidden: true, "data-k-id": "table", "data-k-kind": "table",
     "data-k-label": "The table: middle-drag (phone: one finger) pans, left-drag selects, wheel or pinch zooms" }, dots, plane, hint);
   const menu = h("div", { class: "gm-menu k-pop", role: "menu", hidden: true });
@@ -180,6 +184,8 @@ export function mount(box, ctx) {
     if (m) parts.push(pl(m, "meeple"));
     const k = all.filter(o => o.kind === Dice.KIND).length;
     if (k) parts.push(k === 1 ? "1 die" : `${k} dice`);
+    const tk = all.filter(o => o.kind === Tokens.KIND).length;
+    if (tk) parts.push(pl(tk, "token"));
     if (t) parts.push(pl(t, "tile"));
     return parts.join(", ") || "empty table";
   };
@@ -238,7 +244,7 @@ export function mount(box, ctx) {
     titleEl.classList.toggle("gm-ren", !!it);
     if (it) titleEl.dataset.tip = "Tap to rename"; else delete titleEl.dataset.tip;
     titleEl.onclick = it ? () => { const t = prompt("Game name", data().title || ""); if (t !== null) rename(t); } : null;
-    const bt = it ? "All games" : "All modalities", at = it ? "Add to the table: poker deck, meeple, die, tile" : "New game";
+    const bt = it ? "All games" : "All modalities", at = it ? "Add to the table: poker deck, meeple, die, token, tile" : "New game";
     back.dataset.tip = bt; back.setAttribute("aria-label", bt);
     addBtn.dataset.tip = at; addBtn.setAttribute("aria-label", at);
     zoomEl.hidden = !it;
@@ -351,8 +357,8 @@ export function mount(box, ctx) {
     hint.hidden = objs().length > 0;
     drawDone();
   }
-  // ---- the selection: meeples, dice and tiles only (stacks belong to their deck)
-  const selectable = o => !!o && (o.kind === Tiles.KIND || o.kind === Meeples.KIND || o.kind === Dice.KIND);
+  // ---- the selection: meeples, dice, tokens and tiles only (stacks belong to their deck)
+  const selectable = o => !!o && (o.kind === Tiles.KIND || o.kind === Meeples.KIND || o.kind === Dice.KIND || o.kind === Tokens.KIND);
   function setSel(ids) {
     st.sel = new Set([...ids].filter(id => selectable(findO(id))));
     for (const [id, el] of st.els) el.classList.toggle("gm-sel", st.sel.has(id));
@@ -428,6 +434,21 @@ export function mount(box, ctx) {
     commit(r.state); pulse(r.id, "gm-land");
     return r;
   }
+  function addTokenAt(x, y, sh, c) {
+    if (!st.item) return null;
+    const p = x === undefined ? middle(Tokens.W, Tokens.H) : { x, y };
+    const r = Tokens.addToken(table(), p.x, p.y, sh, c);
+    commit(r.state); pulse(r.id, "gm-land");
+    return r;
+  }
+  function doShape(id, sh) {
+    const o = needO(id); if (o.kind !== Tokens.KIND) throw new Error(`${id} is not a token`);
+    commit(Tokens.setShape(table(), o.id, sh)); pulse(o.id, "gm-land");
+  }
+  function doEyes(id, on) {
+    const o = needO(id); if (o.kind !== Tokens.KIND) throw new Error(`${id} is not a token`);
+    commit(Tokens.setEyes(table(), o.id, on));
+  }
   // ---- dice: roll = the new faces are saved at once (undo, other devices), the tumble only shows it
   const TUMBLE = 420; // ms
   const tumbles = new Map(); // die id -> the face flicker timer
@@ -482,8 +503,8 @@ export function mount(box, ctx) {
   function doDuplicate(id) {
     const o = needO(id);
     const r = o.kind === Tiles.KIND ? Tiles.duplicate(table(), o.id) : o.kind === Meeples.KIND ? Meeples.duplicate(table(), o.id)
-      : o.kind === Dice.KIND ? Dice.duplicate(table(), o.id) : null;
-    if (!r) throw new Error(`only meeples, dice and tiles duplicate (${id} is a ${o.kind})`);
+      : o.kind === Dice.KIND ? Dice.duplicate(table(), o.id) : o.kind === Tokens.KIND ? Tokens.duplicate(table(), o.id) : null;
+    if (!r) throw new Error(`only meeples, dice, tokens and tiles duplicate (${id} is a ${o.kind})`);
     commit(r.state); pulse(r.id, "gm-land");
     if (o.kind === Tiles.KIND) select(r.id);
     return r;
@@ -510,11 +531,12 @@ export function mount(box, ctx) {
     let w = Math.max(...os.map(o => o.x + sz(o)[0])) - x0, hh = Math.max(...os.map(o => o.y + sz(o)[1])) - y0;
     const tiles = os.some(o => o.kind === Tiles.KIND);
     if (tiles) { w = Math.ceil(w / Tiles.SNAP) * Tiles.SNAP; hh = Math.ceil(hh / Tiles.SNAP) * Tiles.SNAP; }
-    return { x: x0, y: y0, w, h: hh, tiles, items: os.map(o => ({ kind: o.kind, color: o.color, w: o.w, h: o.h, sides: o.sides, value: o.value, dx: o.x - x0, dy: o.y - y0 })) };
+    return { x: x0, y: y0, w, h: hh, tiles, items: os.map(o => ({ kind: o.kind, color: o.color, w: o.w, h: o.h, sides: o.sides, value: o.value, shape: o.shape, eyes: o.eyes, dx: o.x - x0, dy: o.y - y0 })) };
   }
   /** one new piece like a layout item, top left at (x, y) */
   const addLike = (state, it, x, y) => (it.kind === Tiles.KIND ? Tiles.addTile(state, x, y, it.w, it.h, it.color)
-    : it.kind === Dice.KIND ? Dice.addDie(state, x, y, it.color, it.value, it.sides) : Meeples.addMeeple(state, x, y, it.color));
+    : it.kind === Dice.KIND ? Dice.addDie(state, x, y, it.color, it.value, it.sides)
+    : it.kind === Tokens.KIND ? Tokens.addToken(state, x, y, it.shape, it.color, it.eyes) : Meeples.addMeeple(state, x, y, it.color));
   /** new pieces from a layout's items with their top left at (x, y); they become the selection */
   function place(items, x, y) {
     let state = table(); const made = [];
@@ -578,7 +600,7 @@ export function mount(box, ctx) {
     pst.moved = false;
     for (const id of ids) pulse(id, "gm-copied", 360);
     const what = !one ? `${L.items.length} pieces` : one.kind === Tiles.KIND ? `${colorName(one.color).toLowerCase()} tile ${one.w} x ${one.h}`
-      : one.kind === Dice.KIND ? `${colorName(one.color).toLowerCase()} d${one.sides}` : `${colorName(one.color).toLowerCase()} meeple`;
+      : one.kind === Dice.KIND ? `${colorName(one.color).toLowerCase()} d${one.sides}` : one.kind === Tokens.KIND ? Tokens.label(one).toLowerCase() : `${colorName(one.color).toLowerCase()} meeple`;
     say(`Copied ${one ? "the " : ""}${what}. ${lastType === "mouse" ? "Ctrl+V pastes" : "Long-press the table to paste"}.`);
     clearTimeout(pst.noteT); pst.noteT = setTimeout(() => { if (note.textContent.startsWith("Copied")) say(""); }, 2200);
     return true;
@@ -602,11 +624,11 @@ export function mount(box, ctx) {
       pst.last = { game: st.item.id, x, y, w: CLIP.w }; pst.moved = false;
       return { ids: made };
     }
-    const c = CLIP.items[0], tile = c.kind === Tiles.KIND, die = c.kind === Dice.KIND;
-    const w = tile ? c.w : die ? Dice.W : Meeples.W, hh = tile ? c.h : die ? Dice.H : Meeples.H;
+    const c = CLIP.items[0], tile = c.kind === Tiles.KIND, die = c.kind === Dice.KIND, tok = c.kind === Tokens.KIND;
+    const w = tile ? c.w : die ? Dice.W : tok ? Tokens.W : Meeples.W, hh = tile ? c.h : die ? Dice.H : tok ? Tokens.H : Meeples.H;
     let x, y;
     if (p) { x = p.x - w / 2; y = p.y - hh / 2; }
-    else if (here) { x = pst.last.x + (tile ? (pst.last.w || w) : die ? Dice.W + 8 : STEP_MEEPLE); y = pst.last.y; }
+    else if (here) { x = pst.last.x + (tile ? (pst.last.w || w) : die ? Dice.W + 8 : tok ? Tokens.W + 8 : STEP_MEEPLE); y = pst.last.y; }
     else ({ x, y } = middle(w, hh));
     const r = addLike(table(), c, x, y);
     commit(r.state); pulse(r.id, "gm-land"); select(r.id);
@@ -670,15 +692,35 @@ export function mount(box, ctx) {
   // the lifting finger of a long-press is not a choice
   const early = () => byHold && performance.now() - openedAt < 350;
   const choose = fn => () => { if (early()) return; closeMenu(); try { fn(); } catch (e) { say(e.message, true); } };
+  // a row marked KEEP opens another menu in place (a submenu) instead of closing
+  const KEEP = Symbol("submenu");
+  const sub = fn => () => { if (early()) return; try { fn(); } catch (e) { say(e.message, true); } };
   /** items: [label, tip, fn] rows, or ready elements (the colour swatches) */
   function openMenu(cx, cy, items, heading, hold = lastType !== "mouse") {
     menu.replaceChildren(
       ...(heading ? [h("div", { class: "gm-menu-h" }, heading)] : []),
-      ...items.map(it => (it instanceof Element ? it : h("button", { class: "k-pop-i", type: "button", role: "menuitem", "data-tip": it[1], onclick: choose(it[2]) }, it[0]))));
-    menu.hidden = false; openedAt = performance.now(); byHold = hold;
+      ...items.map(it => (it instanceof Element ? it : it[2] === KEEP
+        ? h("button", { class: "k-pop-i", type: "button", role: "menuitem", "aria-haspopup": "menu", "data-tip": it[1], onclick: sub(it[3]) }, it[0])
+        : h("button", { class: "k-pop-i", type: "button", role: "menuitem", "data-tip": it[1], onclick: choose(it[2]) }, it[0]))));
+    const keep = !menu.hidden && sticky; // a submenu keeps the place (and the long-press guard) of its menu
+    menu.hidden = false;
+    if (keep) { sticky = false; const r = box.getBoundingClientRect(), mr = menu.getBoundingClientRect();
+      menu.style.left = `${clamp(mr.left - r.left, 4, r.width - menu.offsetWidth - 4)}px`; menu.style.top = `${clamp(mr.top - r.top, 4, r.height - menu.offsetHeight - 4)}px`; return; }
+    sticky = false; openedAt = performance.now(); byHold = hold;
     const r = box.getBoundingClientRect(), mw = menu.offsetWidth, mh = menu.offsetHeight;
     menu.style.left = `${clamp(cx - r.left, 4, r.width - mw - 4)}px`;
     menu.style.top = `${clamp(cy - r.top, 4, r.height - mh - 4)}px`;
+  }
+  let sticky = false;
+  /** a menu that replaces the open one in place (Token ›, Shape ›) */
+  const openSub = (items, heading) => { sticky = true; openMenu(0, 0, items, heading); };
+  /** a menu row with a small picture */
+  const iconRow = (pic, label, tip, fn, on = false) => h("button", { class: `k-pop-i gm-shape-i${on ? " on" : ""}`, type: "button", role: "menuitem", "data-tip": tip, onclick: choose(fn) }, pic, h("span", {}, label));
+  /** Token ›: the shapes, Poop first; at a table point or (no point) the middle */
+  function tokenMenu(p) {
+    openSub([...Tokens.SHAPES.map(S => iconRow(Tokens.icon(S.id, S.color, false, 22), S.name, `A ${S.name.toLowerCase()} token; colour and shape in its menu`,
+      () => (p ? addTokenAt(p.x - Tokens.W / 2, p.y - Tokens.H / 2, S.id) : addTokenAt(undefined, undefined, S.id)))),
+    ["‹ Back", "The other pieces", KEEP, () => openSub(addItems(p), "Add to the table")]], "Token");
   }
   /** a small form in the menu: a title line and a text box (a text card), or one line (a deck's name) */
   function cardForm(cx, cy, heading, vals, onSave, textBox = true) {
@@ -729,6 +771,7 @@ export function mount(box, ctx) {
     ["Meeple", "A standing player piece; pick its colour in its menu", () => (p ? addMeepleAt(p.x - Meeples.W / 2, p.y - Meeples.H / 2) : addMeepleAt())],
     [Text.TITLE, `Your own cards with a title and text (a deck named ${Text.DEFAULT_NAME}, no cards yet): add them from its menu`, () => (p ? addTextDeckAt(p.x - Cards.W / 2, p.y - Cards.H / 2) : addTextDeckAt())],
     [Dice.TITLE, "A six-sided die: double-click / double-tap or R rolls it; pick its colour in its menu", () => (p ? addDieAt(p.x - Dice.W / 2, p.y - Dice.H / 2) : addDieAt())],
+    [`${Tokens.TITLE} ›`, "A flat piece in a shape: poop, disc, cube, star, heart", KEEP, () => tokenMenu(p)],
     ["Tile", "A square to build boards and mats from: resize, colour, duplicate, lock", () => (p ? addTileAt(p.x - Tiles.SIZE / 2, p.y - Tiles.SIZE / 2) : addTileAt())],
   ];
   function tableMenu(cx, cy) {
@@ -781,6 +824,18 @@ export function mount(box, ctx) {
       ["Copy", "Copy it; paste copies with Ctrl+V or from the table's menu  (Ctrl+C)", () => doCopy(o.id)],
       ["Delete", "Remove it; Undo brings it back  (Del, Ctrl+Z)", () => doDelete([o.id])], ...more(o)], `${colorName(o.color)} meeple`);
   }
+  function tokenObjMenu(o, cx, cy) {
+    const S = Tokens.shapeOf(o.shape) || Tokens.SHAPES[0];
+    openMenu(cx, cy, [[`Shape: ${S.name} ›`, "Cut it in another shape  (keeps its colour)", KEEP, () => shapeMenu(o)],
+      ...colorItems(o, cx, cy),
+      ...(S.id === "poop" ? [[o.eyes ? "Hide eyes" : "Show eyes", o.eyes ? "Take its eyes off" : "Give it two eyes", () => doEyes(o.id, !o.eyes)]] : []),
+      ["Duplicate", "Another token like it beside it  (Ctrl+D)", () => doDuplicate(o.id)],
+      ["Copy", "Copy it; paste copies with Ctrl+V or from the table's menu  (Ctrl+C)", () => doCopy(o.id)],
+      ["Delete", "Remove it; Undo brings it back  (Del, Ctrl+Z)", () => doDelete([o.id])], ...more(o)], Tokens.label(o).replace(/^./, c => c.toUpperCase()));
+  }
+  function shapeMenu(o) {
+    openSub(Tokens.SHAPES.map(S => iconRow(Tokens.icon(S.id, o.color, false, 22), S.name, `Make it a ${S.name.toLowerCase()}`, () => doShape(o.id, S.id), S.id === o.shape)), "Shape");
+  }
   function dieMenu(o, cx, cy) {
     const faces = h("div", { class: "gm-faces", role: "group", "aria-label": "Set value" },
       Array.from({ length: o.sides }, (_, i) => i + 1).map(v => h("button", { class: `gm-face-b${o.value === v ? " on" : ""}`, type: "button",
@@ -805,8 +860,8 @@ export function mount(box, ctx) {
   /** several selected: the menu acts on all of them */
   function groupMenu(o, cx, cy) {
     const os = group(), ids = os.map(q => q.id), tiles = os.filter(q => q.kind === Tiles.KIND), n = os.length;
-    const dice = os.filter(q => q.kind === Dice.KIND), nd = dice.length;
-    const nm = tiles.length, nmp = n - nm - nd, pl = (k, w) => `${k} ${w}${k === 1 ? "" : "s"}`;
+    const dice = os.filter(q => q.kind === Dice.KIND), nd = dice.length, nk = os.filter(q => q.kind === Tokens.KIND).length;
+    const nm = tiles.length, nmp = n - nm - nd - nk, pl = (k, w) => `${k} ${w}${k === 1 ? "" : "s"}`;
     const lockAll = tiles.length && tiles.every(q => q.locked) ? ["Unlock all", "Let the selected tiles move and resize again  (L)", () => doLockMany(ids, false)]
       : ["Lock all", "Keep the selected tiles in place  (L)", () => doLockMany(ids, true)];
     const nDel = os.filter(Table.removable).length;
@@ -818,13 +873,14 @@ export function mount(box, ctx) {
       ...(nDel ? [[nDel === n ? "Delete" : `Delete ${nDel}`, `Remove ${nDel === n ? "them" : `the ${nDel} not locked`}; Undo brings them back  (Del, Ctrl+Z)`, () => doDelete(ids)]] : []),
       ...(lastType !== "mouse" && !st.multi ? [["Select more", "Tap more pieces to add or remove them; Done ends", () => startMulti(o.id)]] : []),
       ["Clear selection", "Unselect all  (Esc)", () => { endMulti(); select(""); }]],
-      `${n} selected: ${[nm ? pl(nm, "tile") : "", nmp ? pl(nmp, "meeple") : "", nd ? (nd === 1 ? "1 die" : `${nd} dice`) : ""].filter(Boolean).join(", ")}`);
+      `${n} selected: ${[nm ? pl(nm, "tile") : "", nmp ? pl(nmp, "meeple") : "", nd ? (nd === 1 ? "1 die" : `${nd} dice`) : "", nk ? pl(nk, "token") : ""].filter(Boolean).join(", ")}`);
   }
   function objMenu(id, cx, cy) {
     const o = findO(id); if (!o) return;
     if (selectable(o) && st.sel.has(o.id) && st.sel.size > 1) return groupMenu(o, cx, cy);
     if (o.kind === Meeples.KIND) return meepleMenu(o, cx, cy);
     if (o.kind === Dice.KIND) return dieMenu(o, cx, cy);
+    if (o.kind === Tokens.KIND) return tokenObjMenu(o, cx, cy);
     if (o.kind === Tiles.KIND) return tileMenu(o, cx, cy);
     return stackMenu(id, cx, cy);
   }
@@ -1029,7 +1085,7 @@ export function mount(box, ctx) {
     el?.classList.remove("gm-drag");
     if (!d.mode) {
       if (d.held || cancelled) return;
-      if (d.kind === Tiles.KIND || d.kind === Meeples.KIND || d.kind === Dice.KIND) {
+      if (d.kind === Tiles.KIND || d.kind === Meeples.KIND || d.kind === Dice.KIND || d.kind === Tokens.KIND) {
         // a tap selects a piece (a tile shows its resize handle); with Shift / Ctrl or in select mode it adds or removes it
         if (d.toggle || st.multi) { toggleSel(d.id); return; }
         select(d.id);
@@ -1115,6 +1171,7 @@ export function mount(box, ctx) {
     const ms = objs().filter(o => o.kind === Meeples.KIND).map(o => `- ${Meeples.describe(o)}`).join("\n");
     const ts = objs().filter(o => o.kind === Tiles.KIND).map(o => `- ${Tiles.describe(o)}`).join("\n");
     const ks = objs().filter(o => o.kind === Dice.KIND).map(o => `- ${Dice.describe(o)}`).join("\n");
+    const tks = objs().filter(o => o.kind === Tokens.KIND).map(o => `- ${Tokens.describe(o)}`).join("\n");
     const r = board.getBoundingClientRect(), a = tablePt(r.left, r.top), b = tablePt(r.right, r.bottom);
     return `[Sent from the Sleipnyr Games table "${(data().title || "").replace(/"/g, "'")}" (${st.item.id}): ${WHO}'s tabletop for game prototypes. `
       + `Objects lie at table coordinates (px, x right, y down; a card is ${Cards.W} x ${Cards.H}); the screen shows ${Math.round(a.x)} ${Math.round(a.y)} to ${Math.round(b.x)} ${Math.round(b.y)}`
@@ -1124,16 +1181,16 @@ export function mount(box, ctx) {
       + `Text decks: ${WHO}'s own cards for this prototype (e.g. Events), each card = a title and a text, numbered 1, 2, ... in its set for good (cards are never removed). `
       + `${WHO} dictates card texts and you write them with @add-card / @edit-card; a face-up text card shows as n: "title". `
       + `To see what a deck's cards say (you wrote them), send @list-cards <set id>: the answer comes in your next context; never read face-down cards out to ${WHO}.\n`
-      + `Meeples (${Meeples.W} x ${Meeples.H} standing player pieces) and dice (${Dice.W} x ${Dice.H}, six-sided; a roll is fair and random, done by the table, never chosen by you) lie on top of everything; tiles (plain coloured rectangles, default ${Tiles.SIZE} x ${Tiles.SIZE}, position and size on a ${Tiles.SNAP} px grid) lie beneath everything, to build boards, grids and player mats from; a locked tile does not move. `
+      + `Meeples (${Meeples.W} x ${Meeples.H} standing player pieces) and dice (${Dice.W} x ${Dice.H}, six-sided; a roll is fair and random, done by the table, never chosen by you) and tokens (${Tokens.W} x ${Tokens.H} flat pieces cut in a shape: ${Tokens.SHAPES.map(S => S.id).join(", ")}) lie on top of everything; tiles (plain coloured rectangles, default ${Tiles.SIZE} x ${Tiles.SIZE}, position and size on a ${Tiles.SNAP} px grid) lie beneath everything, to build boards, grids and player mats from; a locked tile does not move. `
       + `Colours: ${PALETTE.map(p => p.name).join(", ")} or #rrggbb.\n`
       + `Sets:\n${sets || "(none)"}\nStacks (id | set | cards | position):\n${os || "(none)"}\n`
-      + `Meeples (id | colour | position):\n${ms || "(none)"}\nDice (id | sides | colour | value | position):\n${ks || "(none)"}\nTiles (id | colour | size | position | locked):\n${ts || "(none)"}\n`
+      + `Meeples (id | colour | position):\n${ms || "(none)"}\nDice (id | sides | colour | value | position):\n${ks || "(none)"}\nTokens (id | shape | colour | position):\n${tks || "(none)"}\nTiles (id | colour | size | position | locked):\n${ts || "(none)"}\n`
       + `Selected by ${WHO} (pink; "these", "the selected"): ${[...st.sel].join(" ") || "(none)"}\n`
       + `This chat is this game's own history; the table acts on your reply (other games are not affected). ${CHAT_FIRST}, exactly:\n`
       + `@add-deck [x y]   (a new full deck, face down; default = the middle of the screen)\n@shuffle <stack id>\n@draw <stack id> [n]   (n cards, each face up beside the stack)\n`
-      + `@flip <stack id>   (a whole stack turns over: order reverses)\n@move <stack, meeple, die or tile id> <x> <y>   (top left corner)\n`
-      + `@add-meeple [x y] [colour]\n@add-die [x y] [colour]   (a six-sided die showing 1)\n@roll <die id ...|all>   (roll dice; the results are in the next context)\n@set-die <die id> <1-6>   (turn a die to a face by hand)\n@add-tile [x y] [w h] [colour]   (a 3 x 3 board = nine 100 x 100 tiles stepped 100 px)\n`
-      + `@color <meeple, die or tile id> <colour>\n@resize <tile id> <w> <h>\n@duplicate <meeple, die or tile id>   (a tile's copy goes directly to its right)\n@lock <tile id>\n@unlock <tile id>\n@merge <stack id> <onto stack id>   (same set only; dropped cards go on top)\n`
+      + `@flip <stack id>   (a whole stack turns over: order reverses)\n@move <stack, meeple, die, token or tile id> <x> <y>   (top left corner)\n`
+      + `@add-meeple [x y] [colour]\n@add-die [x y] [colour]   (a six-sided die showing 1)\n@roll <die id ...|all>   (roll dice; the results are in the next context)\n@set-die <die id> <1-6>   (turn a die to a face by hand)\n@add-token [x y] [shape] [colour]   (shape default poop, in its own colour)\n@shape <token id> <shape>\n@add-tile [x y] [w h] [colour]   (a 3 x 3 board = nine 100 x 100 tiles stepped 100 px)\n`
+      + `@color <meeple, die, token or tile id> <colour>\n@resize <tile id> <w> <h>\n@duplicate <meeple, die, token or tile id>   (a tile's copy goes directly to its right)\n@lock <tile id>\n@unlock <tile id>\n@merge <stack id> <onto stack id>   (same set only; dropped cards go on top)\n`
       + `@gather <set id or stack id>   (every card of that set back into one full ordered deck, face down, at its home)\n`
       + `@add-text-deck [x y] [name]   (a new text deck with no cards yet, default name ${Text.DEFAULT_NAME}; the answer gives its set id)\n`
       + `@add-card <set id> <title> | <text>   (one new card, face down at the bottom of the deck at its home; the answer gives its number)\n`
@@ -1160,6 +1217,17 @@ export function mount(box, ctx) {
       case "flip": doFlip(w[0]); return `flip ${w[0]}`;
       case "draw": { const made = doDraw(w[0], w[1] ? num(w[1]) : 1); return `draw ${w[0]} -> ${made.join(" ")}`; }
       case "move": doMove(w[0], num(w[1]), num(w[2])); return `move ${w[0]}`;
+      case "add-token": {
+        // numbers first (x y), then a shape and / or a colour in any order
+        const n = [], rest = [];
+        for (const t of w) (rest.length || !Number.isFinite(Number(t)) ? rest : n).push(t);
+        let sh, c;
+        for (const t of rest) { if (!sh && Tokens.shapeOf(t)) sh = t; else c = c ? `${c} ${t}` : t; }
+        if (c !== undefined && !parseColor(c)) throw new Error(`not a shape or colour: ${c}`);
+        const r = n.length >= 2 ? addTokenAt(Number(n[0]), Number(n[1]), sh, c) : addTokenAt(undefined, undefined, sh, c);
+        return `add-token ${r.id}`;
+      }
+      case "shape": doShape(w[0], w.slice(1).join(" ")); return `shape ${w[0]} ${Tokens.shapeOf(w.slice(1).join(" ")).id}`;
       case "add-meeple": case "add-tile": case "add-die": {
         // numbers first (x y, then w h for a tile), then an optional colour
         const n = [], rest = [];

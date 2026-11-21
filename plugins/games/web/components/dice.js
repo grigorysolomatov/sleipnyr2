@@ -16,7 +16,8 @@ export const LAYER = 2;        // with the meeples, above tiles (0) and cards (1
 export const SIDES = [6];      // the kinds of dice drawn so far
 
 const clone = o => JSON.parse(JSON.stringify(o));
-const nextId = list => "k" + (Math.max(0, ...list.filter(o => o.kind === KIND).map(o => Number(String(o.id).slice(1)) || 0)) + 1);
+// k1, k2...: one counter with the tokens, so a die and a token never share an id
+const nextId = list => "k" + (Math.max(0, ...list.map(o => (/^k\d+$/.test(String(o.id)) ? Number(String(o.id).slice(1)) : 0))) + 1);
 const color = c => { const v = parseColor(c ?? PALETTE[0].hex); if (!v) throw new Error(`not a colour: ${c}`); return v; };
 const need = (st, id) => { const o = (st.objects || []).find(q => q.id === id && q.kind === KIND); if (!o) throw new Error(`no die ${id}`); return o; };
 const sidesOf = n => { n = Number(n ?? 6); if (!SIDES.includes(n)) throw new Error(`no d${n} yet (dice: ${SIDES.map(s => "d" + s).join(", ")})`); return n; };
