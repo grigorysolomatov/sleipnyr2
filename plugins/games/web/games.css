@@ -86,6 +86,18 @@
 .gm-meeple { position: absolute; width: 40px; height: 44px; cursor: grab; touch-action: none; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .55)); }
 .gm-meeple svg { display: block; width: 100%; height: 100%; }
 .gm-meeple.gm-drag { z-index: 5; cursor: grabbing; will-change: transform; }
+/* a die: a rounded square in its colour with contrasting pips, with the meeples */
+.gm-die { position: absolute; width: 50px; height: 50px; cursor: grab; touch-action: none; border-radius: 10px; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .55)); }
+.gm-die svg { display: block; width: 100%; height: 100%; }
+.gm-die.gm-drag { z-index: 5; cursor: grabbing; will-change: transform; }
+.gm-die.gm-sel { outline: 2px solid var(--accent-here); outline-offset: 2px; }
+/* a die's menu: Set value as a row of face buttons */
+.gm-faces { display: grid; grid-template-columns: repeat(6, 1.9rem); gap: .35rem; padding: .1rem .6rem .45rem; }
+.gm-face-b {
+  width: 1.9rem; height: 1.9rem; padding: 0; border-radius: 6px; cursor: pointer; font: inherit; font-variant-numeric: tabular-nums;
+  background: var(--bg); color: var(--text); border: 1px solid color-mix(in srgb, var(--text) 45%, transparent);
+}
+.gm-face-b.on { outline: 2px solid var(--accent-here); outline-offset: 2px; }
 /* a tile: a plain coloured rectangle beneath everything; handle = resize */
 .gm-tile {
   position: absolute; cursor: grab; touch-action: none; background: var(--gm-tile, #9e9e9e);
@@ -102,7 +114,7 @@
   background: var(--bg); color: var(--text); border: 1px solid var(--accent-here); border-radius: 999px;
   font: inherit; font-size: .9em; padding: .35rem 1rem; cursor: pointer; font-variant-numeric: tabular-nums;
 }
-.gm-meeple.gm-copied, .gm-tile.gm-copied { animation: gm-copied 360ms var(--gm-ease); }
+.gm-meeple.gm-copied, .gm-tile.gm-copied, .gm-die.gm-copied { animation: gm-copied 360ms var(--gm-ease); }
 @keyframes gm-copied { 50% { opacity: .55; } }
 .gm-tile.gm-locked { cursor: inherit; }
 .gm-handle {
@@ -112,8 +124,8 @@
 .gm-tile.gm-sel:not(.gm-locked) .gm-handle { display: block; }
 .gm-board.gm-many .gm-tile.gm-sel .gm-handle { display: none; }
 @media (hover: hover) { .gm-tile:not(.gm-locked):hover .gm-handle { display: block; } }
-.gm-meeple.glide, .gm-tile.glide { transition: transform var(--gm-glide) var(--gm-ease); }
-.gm-meeple.gm-land, .gm-tile.gm-land { animation: gm-land 380ms var(--gm-ease); }
+.gm-meeple.glide, .gm-tile.glide, .gm-die.glide { transition: transform var(--gm-glide) var(--gm-ease); }
+.gm-meeple.gm-land, .gm-tile.gm-land, .gm-die.gm-land { animation: gm-land 380ms var(--gm-ease); }
 /* the colour row in a meeple's or tile's menu; Custom opens the hidden picker */
 .gm-sws { display: grid; grid-template-columns: repeat(6, 1.9rem); gap: .35rem; padding: .4rem .6rem .5rem; }
 .gm-sw {

@@ -1,18 +1,19 @@
 // Whole-table edits that no single component owns: removing pieces, and a
 // game's undo history.
 //
-// Removing: only meeples and tiles go; a locked tile stays, and cards are
+// Removing: only meeples, dice and tiles go; a locked tile stays, and cards are
 // never removed (a set always keeps its 52 cards).
 // History: table states as JSON strings. record() is called after every
 // change (with the new state); undo() / redo() hand back the state to show.
 // A tag joins quick repeats of one action (arrow-key nudges) into one step.
 import * as Meeples from "./meeples.js";
 import * as Tiles from "./tiles.js";
+import * as Dice from "./dice.js";
 
 const clone = o => JSON.parse(JSON.stringify(o));
 
-/** a piece that may be removed: a meeple, or a tile that is not locked */
-export const removable = o => !!o && (o.kind === Meeples.KIND || (o.kind === Tiles.KIND && !o.locked));
+/** a piece that may be removed: a meeple, a die, or a tile that is not locked */
+export const removable = o => !!o && (o.kind === Meeples.KIND || o.kind === Dice.KIND || (o.kind === Tiles.KIND && !o.locked));
 
 /** The table without the removable pieces among ids (others are kept). */
 export function removePieces(st, ids) {
