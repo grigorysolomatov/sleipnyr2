@@ -373,18 +373,52 @@ export async function mount(root, ctx) {
     // in the same frame as the title: this thread's known messages, or an
     // empty log while they load; never the previous thread's
     const known = msgCache.get(id);
-    st.msgs = known ? new Map(known) : new Map(); st.loading = !known; st.arrived = new Set();
+    st.msgs = known ? new Map(known) : new Map(); st.loading = !known; st.landed = new Set(); // ids live events brought during the read (st.arrived = glide times)
     drawLog(true);
+    st.loadFailed = false;
     let msgs;
     try { msgs = await ctx.api(`${API}/threads/${encodeURIComponent(id)}/messages`); }
-    catch (e) { if (seq === openSeq) { st.loading = false; drawLog(); } throw e; }
+    catch (e) { console.error(e); if (seq === openSeq) { st.loading = false; st.loadFailed = !known; drawLog(); } return; } // re-read on reconnect / recheck
     if (seq === openSeq) st.loading = false;
     if (seq !== openSeq || st.open !== id) return;
-    const fresh = new Map(msgs.map(m => [m.id, m]));
-    // a live event that landed while the read was on its way is newer: keep it
-    for (const mid of st.arrived) { const m = st.msgs.get(mid); if (m && !(Number(fresh.get(mid)?.updated) >= Number(m.updated))) fresh.set(mid, m); }
+    const fresh = mergeRead(msgs);
     st.msgs = fresh; cacheMsgs(id, fresh);
     drawLog(!known || nearBottom());
+  }
+  // A fresh read of the open thread, merged by id: a live event that landed
+  // while the read was on its way is newer and stays; a message still on its
+  // way from this page (p:<clientId>) stays until the server has it.
+  function mergeRead(msgs) {
+    const fresh = new Map(msgs.map(m => [m.id, m]));
+    for (const mid of st.landed) { const m = st.msgs.get(mid); if (m && !(Number(fresh.get(mid)?.updated) >= Number(m.updated))) fresh.set(mid, m); }
+    const cids = new Set(msgs.map(m => m.data.clientId).filter(Boolean));
+    for (const [k, m] of st.msgs) if (k.startsWith("p:") && !cids.has(m.data.clientId)) fresh.set(k, m);
+    return fresh;
+  }
+  // Catch up the open thread without redrawing what is already right (after a
+  // reconnect, a failed load, or while a sent message waits for its echo).
+  let refreshing = null;
+  function refreshOpen() { return refreshing ||= readOpen().finally(() => { refreshing = null; }); }
+  async function readOpen() {
+    const id = st.open, seq = openSeq;
+    if (!id) return;
+    const msgs = await ctx.api(`${API}/threads/${encodeURIComponent(id)}/messages`);
+    if (seq !== openSeq || st.open !== id) return;
+    const fresh = mergeRead(msgs), was = st.msgs, failed = st.loadFailed;
+    st.loadFailed = false;
+    for (const m of fresh.values()) if (m.data.clientId && was.has(`p:${m.data.clientId}`)) settle(m);
+    st.msgs = fresh; cacheMsgs(id, fresh);
+    if (failed) return drawLog(true);
+    for (const [k, m] of fresh) if (was.get(k) !== m && Number(was.get(k)?.updated) !== Number(m.updated)) try { redrawMessage(k); } catch (e) { console.error(e); }
+  }
+  // the server's copy of a message this page sent replaces the local one in place (no second glide)
+  function settle(m) {
+    const cid = m?.data?.clientId, pid = cid && `p:${cid}`;
+    if (!pid || m.data.role !== "user") return;
+    for (const map of [st.msgs, msgCache.get(m.data.thread)]) map?.delete(pid);
+    const el = document.getElementById(pid);
+    if (el && !document.getElementById(m.id)) el.id = m.id; else el?.remove();
+    if (st.arrived?.has(pid)) { st.arrived.set(m.id, st.arrived.get(pid)); st.arrived.delete(pid); }
   }
 
   // a thread with news nobody asked for (a notice's reply) is bold in the list until opened
@@ -426,8 +460,9 @@ export async function mount(root, ctx) {
     const stick = toBottom || nearBottom();
     const olds = new Map([...log.querySelectorAll(".c-msg")].map(e => [e.id, e]));
     log.replaceChildren(...[...st.msgs.values()].filter(m => !heldBack(m)).map(m => { const el = messageEl(m); keepPlayers(olds.get(m.id), el); return el; }));
-    if (!st.msgs.size && !st.loading) log.append(h("p", { class: "c-hello" }, st.open ? "New thread. Write, talk or paste a screenshot." : "Pick a thread or start a new one."));
-    if (!st.msgs.size && st.open && !st.loading) { const p = agentPicker(); if (p) log.append(p); }
+    if (!st.msgs.size && st.loadFailed) log.append(h("p", { class: "c-hello" }, "Could not load this thread (no connection). It loads by itself when the connection is back."));
+    else if (!st.msgs.size && !st.loading) log.append(h("p", { class: "c-hello" }, st.open ? "New thread. Write, talk or paste a screenshot." : "Pick a thread or start a new one."));
+    if (!st.msgs.size && st.open && !st.loading && !st.loadFailed) { const p = agentPicker(); if (p) log.append(p); }
     if (stick) log.scrollTop = logEnd();
     syncJump();
     for (const fn of drawHooks) try { fn(st.open); } catch (e) { console.error(e); }
@@ -489,6 +524,7 @@ export async function mount(root, ctx) {
         d.resent ? null : h("button", { class: "c-btn c-again", type: "button", "data-tip": `Send this message to ${agentName} again`,
           onclick: e => sendAgain(d.thread, m.id, e.currentTarget) }, "Send again")));
     }
+    if (d.role === "user" && d.pending) el.append(h("p", { class: "c-quiet", role: "status" }, d.pending)); // on its way from this page
     if (d.role === "user" && d.steered) el.append(h("p", { class: "c-quiet" }, "added to the answer already running"));
     if (d.role === "agent" && (d.skipped || d.steered)) el.hidden = true; // no reply of its own
     if (d.calls?.length) el.append(h("ul", { class: "c-calls", "data-tip": "What the agent did on screen (declared actions)" },
@@ -630,7 +666,8 @@ export async function mount(root, ctx) {
       const cached = msgCache.get(item.data.thread);
       if (cached && cached !== st.msgs) cached.set(item.id, item);
       if (item.data.thread !== st.open) return;
-      st.msgs.set(item.id, item); st.arrived?.add(item.id);
+      settle(item);
+      st.msgs.set(item.id, item); st.landed?.add(item.id);
       if (["done", "error", "stopped", "cancelled"].includes(item.data.status)) { st.live.delete(item.id); st.steps.delete(item.id); }
       redrawMessage(item.id);
     }
@@ -652,6 +689,8 @@ export async function mount(root, ctx) {
         if (item?.data && item.data.status !== m.data.status) onItem(item);
       } catch (e) { console.error(e); }
     }
+    if (st.open && (st.loadFailed || [...st.msgs.keys()].some(k => k.startsWith("p:")))) refreshOpen().catch(e => console.error(e));
+    if (st.listFailed) loadThreads().then(() => { st.listFailed = false; }, () => {});
   }
   setInterval(recheck, 15000);
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") recheck(); });
@@ -667,7 +706,7 @@ export async function mount(root, ctx) {
     st.live.set(ev.message, cur);
     redrawMessage(ev.message);
   });
-  ctx.onReconnect(() => { loadThreads(); loadHist(); if (st.open) openThread(st.open, false); });
+  ctx.onReconnect(() => { loadThreads().then(() => { st.listFailed = false; }, e => console.error(e)); loadHist(); if (st.open) refreshOpen().catch(e => console.error(e)); });
 
   // ------------------------------------------------------------ bar targets
   async function ensureThread() {
@@ -689,10 +728,24 @@ export async function mount(root, ctx) {
   }
 
   async function post(id, body) {
-    const out = await ctx.api(`${API}/threads/${encodeURIComponent(id)}/messages`, { json: body });
+    // shown at once (grey "sending…" line) until the server's copy replaces it;
+    // a failed try says so and the bar's outbox resends it with the same clientId
+    const pid = body.clientId ? `p:${body.clientId}` : "";
+    const local = (pending, extra = {}) => {
+      if (!pid || st.open !== id || [...st.msgs.values()].some(m => m.id !== pid && m.data.clientId === body.clientId)) return;
+      const p = st.msgs.get(pid), now = Date.now();
+      st.msgs.set(pid, { id: pid, type: "message", created: p?.created || now, updated: now,
+        data: { role: "user", thread: id, text: body.text || "", files: body.files || [], ...(body.voice ? { voice: body.voice } : {}), clientId: body.clientId, pending, ...extra } });
+      try { redrawMessage(pid); } catch (e) { console.error(e); }
+    };
+    local("sending…");
+    let out;
+    try { out = await ctx.api(`${API}/threads/${encodeURIComponent(id)}/messages`, { json: body }); }
+    catch (e) { local("not sent yet · retries by itself"); throw e; }
     pillAdd(out.reply?.id, "", id);
     if (st.open !== id) return out;
     // the server has it now: a drawing glitch must never look like "not sent" (that invites resends)
+    try { settle(out.user); } catch (e) { console.error(e); }
     for (const m of [out.user, out.reply]) { st.msgs.set(m.id, m); try { redrawMessage(m.id); } catch (e) { console.error(e); } }
     log.scrollTo({ top: logEnd(), behavior: "smooth" });
     return out;
@@ -1397,10 +1450,10 @@ export async function mount(root, ctx) {
   ].filter(Boolean));
 
   await loadAgents();
-  await loadThreads();
+  await loadThreads().catch(e => { console.error(e); st.listFailed = true; drawThreads(); }); // no connection: retried by recheck / reconnect
   await loadHist();
   const start = ctx.route();
-  if (start && threadOf(start)) await openThread(start, false);
+  if (start && (threadOf(start) || st.listFailed)) await openThread(start, false);
   else drawLog(true);
   mb.refresh();
 

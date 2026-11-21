@@ -53,34 +53,74 @@ const parentShell = (() => {
 })();
 const framed = new URLSearchParams(location.search).get("frame") === "1" && window.parent !== window;
 
+// Bad wifi: a request that gets no answer gives up after `timeout` ms (reads
+// 15 s, writes 30 s) instead of hanging forever, and a read is tried three
+// times with a short pause. Writes are never repeated here: a message carries
+// its clientId and the bar resends it, so the server keeps one copy.
 async function api(path, opts = {}) {
-  const init = { ...opts, headers: { ...(opts.headers || {}) } };
+  const { timeout, ...rest } = opts;
+  const init = { ...rest, headers: { ...(opts.headers || {}) } };
   if (opts.json !== undefined) {
     init.method = init.method || "POST";
     init.body = JSON.stringify(opts.json);
     init.headers["content-type"] = "application/json";
   }
-  const r = await fetch(path, init);
-  const body = await r.json().catch(() => ({}));
+  const read = !init.method || init.method === "GET", ms = timeout ?? (read ? 15000 : 30000);
+  for (let i = 0; ; i++) {
+    try { return await request(path, init, ms); }
+    catch (e) { if (!read || !e.net || i >= 2) throw e; await sleep(1000 * 2 ** i); }
+  }
+}
+async function request(path, init, ms) {
+  const ab = new AbortController(), t = ms ? setTimeout(() => ab.abort(), ms) : 0;
+  let r, body;
+  try { r = await fetch(path, { ...init, signal: ab.signal }); body = await r.json().catch(() => ({})); }
+  catch (e) {
+    netDown();
+    throw Object.assign(new Error(ab.signal.aborted ? "no answer from the server (timed out)" : "no connection"), { net: true });
+  }
+  finally { clearTimeout(t); }
+  if (r.status >= 502 && r.status <= 504) throw Object.assign(new Error(body.error || `server not reachable (HTTP ${r.status})`), { net: true });
   if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
   return body;
 }
 
 const upload = file => api(`/k/files?name=${encodeURIComponent(file.name || "file")}`, {
-  method: "POST", body: file, headers: { "content-type": file.type || "application/octet-stream" },
+  method: "POST", body: file, headers: { "content-type": file.type || "application/octet-stream" }, timeout: 300000,
 });
+
+// While the connection is down a small calm note says so (bottom left, above
+// the bar): what the view shows may be out of date until it is back. It waits
+// 3 s, so a blip never flashes it; the event stream coming back hides it.
+let netEl = null, netTimer = 0;
+function netDown() {
+  if (parentShell || netTimer || (netEl && !netEl.hidden)) return;
+  netTimer = setTimeout(() => {
+    netTimer = 0;
+    if (!netEl) {
+      netEl = Object.assign(document.createElement("div"), { className: "k-net", textContent: "Offline · reconnecting…",
+        title: "The connection dropped: this view may be out of date. It catches up by itself." });
+      netEl.setAttribute("role", "status");
+      document.body.append(netEl);
+    }
+    netEl.hidden = false;
+  }, 3000);
+}
+function netUp() { clearTimeout(netTimer); netTimer = 0; if (netEl) netEl.hidden = true; }
 
 // one EventSource for all topics; reopened with the new topic list when it grows
 const handlers = new Map(), reconnects = new Set();
 const settingsHooks = new Set();
-let source = null, opened = false, heard = 0;
+let source = null, opened = false, lost = false, heard = 0;
 function connect() {
   if (source) source.close();
   heard = Date.now();
   const qs = [...handlers.keys()].map(t => "topic=" + encodeURIComponent(t)).join("&");
   source = new EventSource("/k/events?" + qs);
-  source.onopen = () => { heard = Date.now(); if (opened) reconnects.forEach(f => f()); opened = true; };
-  source.addEventListener("ping", () => { heard = Date.now(); });
+  // after any drop (also when the first try failed) the views catch up
+  source.onopen = () => { heard = Date.now(); netUp(); if (opened || lost) reconnects.forEach(f => f()); opened = true; lost = false; };
+  source.onerror = () => { lost = true; netDown(); };
+  source.addEventListener("ping", () => { heard = Date.now(); netUp(); });
   source.onmessage = e => {
     heard = Date.now();
     let m; try { m = JSON.parse(e.data); } catch { return; }
@@ -114,6 +154,7 @@ const revive = () => { if (source) { opened = true; connect(); } };
 const stale = ms => !source || source.readyState === EventSource.CLOSED || Date.now() - heard > ms;
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && stale(25000)) revive(); });
 addEventListener("online", revive);
+addEventListener("offline", netDown);
 addEventListener("pageshow", e => { if (e.persisted) revive(); });
 setInterval(() => { if (document.visibilityState === "visible" && source && stale(45000)) revive(); }, 5000);
 

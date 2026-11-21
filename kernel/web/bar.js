@@ -352,7 +352,7 @@ export function createBar(ctx, app) {
       const rec = b.textRec || { id: tid, kind: "text", at: Date.now(), pin: tpin };
       Object.assign(rec, { text, files: b.pending.map(p => p.id).filter(Boolean), href: location.pathname + location.hash, target: current, mode: mode || "" });
       b.textRec = rec;
-      keep(rec, e, `Not sent: ${e.message} (kept)`, () => sendNow());
+      keep(rec, e, `Not sent yet: ${e.message}. It retries by itself (kept)`, () => sendNow());
     }
     finally { b.sending = false; form.classList.remove("busy"); }
   }
@@ -470,7 +470,7 @@ export function createBar(ctx, app) {
     if (r.pin) note.append(" ", btn("Send", `Send it now to ${r.pin.label ? `“${r.pin.label}”` : "where it was recorded"}, marked as late`, go("send")));
     if (!r.pin || !samePin(r.pin, pinNow())) note.append(" ", btn(r.pin ? "Send here" : "Send", "Send it now to the conversation on screen, marked as late", go("here")));
     if (r.blob) note.append(" ", h("a", { href: URL.createObjectURL(r.blob), download: r.name || "voice.webm", "data-tip": "Download the recording" }, "save"));
-    note.append(" ", btn("Drop", "Remove it from this device's outbox (nothing is sent)", () => { forget(r); decided.delete(r.id); say(""); resumeOutbox(); }));
+    note.append(" ", btn("Drop", "Remove it from this device's outbox (nothing is sent)", () => { forget(r); decided.delete(r.id); if (b.textRec?.id === r.id) b.textRec = null; say(""); resumeOutbox(); }));
   }
   let resuming = false;
   async function resumeOutbox(now = false) {
@@ -478,11 +478,15 @@ export function createBar(ctx, app) {
     resuming = true;
     try { await resumeAll(now); } finally { resuming = false; }
   }
+  // A typed message that failed (b.textRec, its text still in the field) is
+  // retried too; once it is through the field empties if it still holds it.
+  const asked = new Set(); // asked about on this page: the timer does not ask again
   async function resumeAll(now) {
-    const recs = (await outbox.all()).filter(r => r !== b.textRec && r.id !== b.textRec?.id).sort((x, y) => x.id < y.id ? -1 : 1);
+    if (b.sending) return;
+    const recs = (await outbox.all()).map(r => r.id === b.textRec?.id ? b.textRec : r).sort((x, y) => x.id < y.id ? -1 : 1);
     for (const r of recs) {
       let pick = decided.get(r.id);
-      if (!pick && Date.now() - atOf(r) > STALE_MS) { askAbout(r, "the connection was down"); return; }
+      if (!pick && Date.now() - atOf(r) > STALE_MS) { if (now || !asked.has(r.id)) { asked.add(r.id); askAbout(r, "the connection was down"); } return; }
       if (!pick && r.pin) pick = "send";
       if (!pick) { // no pin (a view without pins): only into the same view, never silently elsewhere
         const t0 = Date.now();
@@ -497,11 +501,17 @@ export function createBar(ctx, app) {
         if (r.kind !== "text" && !r.voice) { r.voice = (await ctx.upload(new File([r.blob], r.name, { type: r.type }))).id; await outbox.put(r); }
         await deliverRec(r, recBody(r), pick === "here");
         forget(r); decided.delete(r.id); say("");
+        if (r === b.textRec) { b.textRec = null; if (ta.value.trim() === (r.text || "").trim()) { ta.value = ""; grow(); } }
       } catch (e) { say(`${r.kind === "text" ? "Message" : "Voice message"} still not sent: ${e.message} (kept)`, true); retryBtn(); return; }
     }
   }
   setTimeout(resumeOutbox, 0);
+  // phones often never fire "online": also retry when the event stream is
+  // back, when the page is shown again, and every 20 s
   addEventListener("online", () => resumeOutbox());
+  ctx.onReconnect?.(() => resumeOutbox());
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") resumeOutbox(); });
+  setInterval(() => { if (document.visibilityState === "visible") resumeOutbox(); }, 20000);
 
   addEventListener("keydown", e => {
     if (!e.altKey || e.ctrlKey || e.metaKey) return;

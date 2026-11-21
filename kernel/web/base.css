@@ -104,6 +104,13 @@ button, input, textarea { font: inherit; color: inherit; }
   background: var(--bg, #000); color: var(--text, #fff); border: 1px solid var(--text, #fff); border-radius: 999px;
   padding: .35rem .9rem; font: inherit; font-size: .85em; cursor: pointer; white-space: nowrap;
 }
+/* connection note (shell.js): top centre under the view header, over the oldest
+   lines rather than the newest message or the bar; calm grey, never in the way */
+.k-net {
+  position: fixed; left: 50%; transform: translateX(-50%); top: calc(3.6rem + env(safe-area-inset-top)); z-index: 50;
+  background: var(--bg, #000); color: var(--text-muted, #8a8a8a); border: 1px solid var(--line, #333); border-radius: 999px;
+  padding: .35rem .9rem; font-size: .85em; white-space: nowrap; pointer-events: none;
+}
 /* code-block copy button (text.js): frameless icon top right inside the block */
 pre:has(> .tx-copy) { position: relative; padding-right: 2.6rem !important; }
 pre:has(> .tx-copy) > code { white-space: pre-wrap; overflow-wrap: anywhere; }
