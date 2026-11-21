@@ -187,7 +187,7 @@ export type AgentEvent =
   | { type: "delta"; text: string } // streamed reply text, appended
   | { type: "progress"; text: string } // one line of what the agent does now
   | { type: "state"; state: Record<string, unknown> } // remember for this conversation
-  | { type: "done"; text: string; unsent?: string } // finished, whole reply; unsent = steer text it never took in
+  | { type: "done"; text: string; unsent?: string; node?: string } // finished, whole reply; unsent = steer text it never took in; node = machine that produced it
   | { type: "error"; message: string };
 
 export interface AgentTurn {
@@ -202,7 +202,7 @@ export interface AgentTurn {
 
 /** service "agent": talk to one or more agents */
 export interface AgentService {
-  agents(): { id: string; name: string }[];
+  agents(): { id: string; name: string; nodes?: string[] }[];
   send(agentId: string, turn: AgentTurn): AsyncIterable<AgentEvent>;
   /** continue a turn after a kernel restart, from state saved via "state" events */
   resume?(agentId: string, turn: AgentTurn): AsyncIterable<AgentEvent>;

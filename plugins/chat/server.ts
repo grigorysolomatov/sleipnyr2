@@ -51,6 +51,8 @@ export interface Message {
   // stopped (agent reply): stopped by the user; skipped = it never ran. cancelled (user message): never sent.
   // steered: the user message went into the turn that was already running (its reply stays empty, hidden).
   skipped?: boolean; steered?: boolean;
+  // node (agent reply): the machine the agent ran on when it produced this reply (agents that move between nodes)
+  node?: string;
   // clientId (user message): the sending device's id for it; a repeat with the same id returns the first post.
   // recordedAt: when the device made it (ms); much earlier than created = it waited in the device's outbox.
   clientId?: string; recordedAt?: number;
@@ -727,7 +729,7 @@ class Chat {
           // (also when the strip still shows a retired history thread, which has no view any more:
           // the message then says which view it came from)
           const acts = thread.data.view || user.data.from ? extractActions(out.text) : null;
-          this.k.items.update(replyId, { text: acts ? acts.text : out.text, files: out.files, status: "done",
+          this.k.items.update(replyId, { text: acts ? acts.text : out.text, files: out.files, status: "done", ...(ev.node ? { node: ev.node } : {}),
             ...(acts?.actions.length ? { actions: acts.actions } : {}) });
           this.publish(threadId, replyId, { progress: "" });
           this.maybeRetitle(threadId);

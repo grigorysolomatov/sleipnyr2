@@ -118,6 +118,11 @@ pre:has(> .tx-copy) > code { white-space: pre-wrap; overflow-wrap: anywhere; }
 .tx-copy:hover { color: var(--text-muted, #8a8a8a); }
 .tx-copy.done { color: var(--accent-here, #ff0088); }
 .tx-copy svg { width: 1.1rem; height: 1.1rem; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+/* LaTeX math (text.js + vendor/temml.js): native MathML; the source shows until it renders */
+math { font-family: "STIX Two Math", "Latin Modern Math", "Cambria Math", "Noto Sans Math", "DejaVu Math TeX Gyre", math; font-style: normal; font-weight: normal; }
+.tx-math:not(.ok) { font-family: ui-monospace, monospace; font-size: .9em; color: var(--text-muted, #8a8a8a); }
+.tx-math-block { display: block; margin: .5em 0; overflow-x: auto; overflow-y: hidden; max-width: 100%; }
+.tx-math-block math { font-size: 1.1em; }
 
 /* the shared popover (one look): black fill, white 1px, radius; rows = items,
    .k-pop-h = small grey heading, .k-pop-back = back row, .k-pop-scroll = long list */

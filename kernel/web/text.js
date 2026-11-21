@@ -1,8 +1,12 @@
 // A small, safe Markdown subset -> DOM nodes (never innerHTML):
 // ``` code blocks ```, `code`, **bold**, *italic*, [text](https://link),
 // [text](/same-origin/path) links (e.g. /k/files/<id>), bare https:// links, "- " / "1. " lists (indented lines = item details), "# " headings, paragraphs.
+// LaTeX math: $inline$ or \(inline\), $$display$$ or \[display\] (own block). Rendered to native
+// MathML by the vendored Temml (vendor/temml.js, MIT), loaded only when a message contains math.
+// $...$ needs a non-space right inside both dollars and no digit right after the closing one,
+// so prices like "$5 and $10" stay text.
 
-const INLINE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\*[^*\n]+\*)|(\[[^\]\n]+\]\((?:https?:\/\/|\/(?!\/))[^\s)]+\))|(https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"])/g;
+const INLINE = /(`[^`\n]+`)|(\$(?=\S)[^$\n]+?(?<=\S)\$(?!\d)|\\\([^\n]+?\\\))|(\*\*[^*\n]+\*\*)|(\*[^*\n]+\*)|(\[[^\]\n]+\]\((?:https?:\/\/|\/(?!\/))[^\s)]+\))|(https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"])/g;
 
 function inline(text) {
   const out = [];
@@ -12,11 +16,12 @@ function inline(text) {
     const s = m[0];
     let el;
     if (m[1]) { el = document.createElement("code"); el.textContent = s.slice(1, -1); }
-    else if (m[2]) { el = document.createElement("strong"); el.append(...inline(s.slice(2, -2))); }
-    else if (m[3]) { el = document.createElement("em"); el.append(...inline(s.slice(1, -1))); }
+    else if (m[2]) el = math(s.startsWith("$") ? s.slice(1, -1) : s.slice(2, -2), false);
+    else if (m[3]) { el = document.createElement("strong"); el.append(...inline(s.slice(2, -2))); }
+    else if (m[4]) { el = document.createElement("em"); el.append(...inline(s.slice(1, -1))); }
     else {
       el = document.createElement("a");
-      const [label, href] = m[4] ? [s.slice(1, s.indexOf("](")), s.slice(s.indexOf("](") + 2, -1)] : [s, s];
+      const [label, href] = m[5] ? [s.slice(1, s.indexOf("](")), s.slice(s.indexOf("](") + 2, -1)] : [s, s];
       el.href = href; el.textContent = label; el.target = "_blank"; el.rel = "noopener noreferrer";
     }
     out.push(el);
@@ -25,6 +30,24 @@ function inline(text) {
   if (last < text.length) out.push(text.slice(last));
   return out;
 }
+
+// Math: a placeholder showing the source, replaced by MathML once Temml has loaded.
+// A formula Temml can't parse keeps its source text (title = the error).
+let temml = null;
+function math(tex, display) {
+  const el = document.createElement(display ? "div" : "span");
+  el.className = display ? "tx-math tx-math-block" : "tx-math";
+  el.textContent = display ? tex.trim() : tex;
+  temml ??= import("/web/vendor/temml.js").then(m => m.default);
+  temml.then(t => {
+    // render into a spare node: Temml empties its target before it can throw
+    const out = document.createElement("span");
+    try { t.render(tex, out, { displayMode: display, throwOnError: true }); el.replaceChildren(...out.childNodes); el.classList.add("ok"); }
+    catch (e) { el.title = String(e?.message || e); }
+  }).catch(() => {});
+  return el;
+}
+const DISPLAY = /\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]/g;
 
 // Copy button on every code block (two overlapping squares; tick for 1.5 s once copied).
 const COPY = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>';
@@ -60,6 +83,19 @@ export function render(text) {
       code.textContent = part.replace(/\n$/, ""); pre.append(code, copyButton(code)); frag.append(pre);
       return;
     }
+    // display math is its own block; the text around it is handled as usual
+    let last = 0;
+    for (const m of part.matchAll(DISPLAY)) {
+      blocks(part.slice(last, m.index), frag);
+      frag.append(math(m[1] ?? m[2], true));
+      last = m.index + m[0].length;
+    }
+    blocks(part.slice(last), frag);
+  });
+  return frag;
+}
+
+function blocks(part, frag) {
     // a "# " heading is its own block even without blank lines around it
     for (const block of part.replace(/^(#{1,4} .*)$/gm, "\n$1\n").split(/\n{2,}/)) {
       const lines = block.split("\n").filter(l => l.trim());
@@ -90,6 +126,4 @@ export function render(text) {
         frag.append(p);
       }
     }
-  });
-  return frag;
 }

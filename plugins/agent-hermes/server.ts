@@ -6,7 +6,10 @@
 // after a kernel restart resume() follows the same run again (GET /v1/runs/<id>).
 //
 // Config (plugins.agent-hermes):
-//   agents: [{ id, name, url, keyEnv, titlePrefix? }]   keyEnv = env var holding the API key
+//   agents: [{ id, name, url, keyEnv, titlePrefix?, nodes? }]   keyEnv = env var holding the API key
+//     nodes: [{ name, url }] = machines the same agent may run on (one at a time, it moves
+//     between them); each turn goes to the first that answers GET /health, and the reply
+//     carries that node's name (shown as "Agent (home)"). Without nodes: url, no name.
 //   timeoutSeconds: liveness limit without any sign of life (default 600)
 //   filesUrl: where the agent (same machine) downloads attachments
 //             (default http://127.0.0.1:8180/k/files)
@@ -18,11 +21,13 @@ import type {
   AgentEvent, AgentService, AgentTurn, AttachedFile, Kernel, ServerPlugin,
 } from "../../kernel/contract.ts";
 
-interface AgentConfig { id: string; name: string; url: string; keyEnv: string; titlePrefix?: string }
+interface NodeConfig { name: string; url: string }
+interface AgentConfig { id: string; name: string; url: string; keyEnv: string; titlePrefix?: string; nodes?: NodeConfig[] }
 
 const VISION = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 const VISION_BUDGET = 6 * 1024 * 1024; // Hermes caps a request at 10 MB; base64 grows by 4/3
 const POLL_MS = 2000;
+const NODE_CACHE_MS = 10000; // how long a found node is trusted before asking again
 const TEXT = /^text\/|^application\/(json|xml|x-yaml|yaml|csv|x-sh|javascript|x-python|toml|x-tex)\b|\+(json|xml)$/;
 const TEXT_EXT = /\.(txt|md|org|csv|tsv|json|ya?ml|toml|xml|html?|css|js|ts|py|sh|el|nix|tex|bib|log|ini|cfg|conf)$/i;
 const INLINE_BUDGET = 100 * 1024; // text inlined per turn, all files together
@@ -55,31 +60,54 @@ export function content(text: string, files: AttachedFile[], base = filesUrl): s
 }
 
 class HermesAgent {
-  constructor(readonly cfg: AgentConfig, readonly author: { id: string; name: string }, readonly timeoutMs: number) {}
+  readonly nodes: NodeConfig[];
+  private found: { node: NodeConfig; at: number } | null = null;
+  constructor(readonly cfg: AgentConfig, readonly author: { id: string; name: string }, readonly timeoutMs: number) {
+    this.nodes = cfg.nodes?.length ? cfg.nodes : [{ name: "", url: cfg.url }];
+  }
+
+  /** The node the agent runs on now: the first whose GET /health answers (the first node if none does). */
+  async node(): Promise<NodeConfig> {
+    if (this.nodes.length === 1) return this.nodes[0];
+    if (this.found && Date.now() - this.found.at < NODE_CACHE_MS) return this.found.node;
+    let node = this.nodes[0];
+    for (const n of this.nodes) {
+      const ok = await fetch(n.url.replace(/\/+$/, "") + "/health", { signal: AbortSignal.timeout(3000) })
+        .then(r => r.ok, () => false);
+      if (ok) { node = n; break; }
+    }
+    this.found = { node, at: Date.now() };
+    return node;
+  }
+
+  /** The node a turn started on (its state), else the current one. */
+  private async nodeOf(state: Record<string, unknown>): Promise<NodeConfig> {
+    return this.nodes.find(n => n.name && n.name === state.node) ?? this.node();
+  }
 
   private headers(extra: Record<string, string> = {}) {
     return { authorization: `Bearer ${process.env[this.cfg.keyEnv] ?? ""}`, "content-type": "application/json", ...extra };
   }
 
-  private async call(path: string, init: RequestInit = {}, ms = 60000): Promise<Response> {
+  private async call(node: NodeConfig, path: string, init: RequestInit = {}, ms = 60000): Promise<Response> {
     const signal = init.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(ms)]) : AbortSignal.timeout(ms);
-    const r = await fetch(this.cfg.url.replace(/\/+$/, "") + path, { ...init, headers: this.headers(init.headers as any), signal });
+    const r = await fetch(node.url.replace(/\/+$/, "") + path, { ...init, headers: this.headers(init.headers as any), signal });
     if (r.status === 401 || r.status === 403) throw new Error(`agent rejected the API key (HTTP ${r.status})`);
     return r;
   }
 
-  private async newSession(turn: AgentTurn): Promise<string> {
+  private async newSession(node: NodeConfig, turn: AgentTurn): Promise<string> {
     const id = `sleipnyr2-${turn.conversation}-${crypto.randomUUID().slice(0, 8)}`;
     const title = `${this.cfg.titlePrefix ?? "sleipnyr2"} ${turn.title.slice(0, 60)} ${id.slice(-8)}`.trim();
-    const r = await this.call("/api/sessions", { method: "POST", body: JSON.stringify({ id, title, source: "api_server" }), signal: turn.signal });
+    const r = await this.call(node, "/api/sessions", { method: "POST", body: JSON.stringify({ id, title, source: "api_server" }), signal: turn.signal });
     if (!r.ok) throw new Error(`could not open an agent session (HTTP ${r.status}: ${(await r.text()).slice(0, 160)})`);
     return id;
   }
 
-  private async startRun(session: string, turn: AgentTurn, key: string): Promise<string | null> {
+  private async startRun(node: NodeConfig, session: string, turn: AgentTurn, key: string): Promise<string | null> {
     const body = { session_id: session, author: { ...this.author, is_bot: false },
       input: [{ role: "user", content: content(turn.text, turn.files) }] };
-    const r = await this.call("/v1/runs", { method: "POST", headers: { "idempotency-key": key }, body: JSON.stringify(body), signal: turn.signal });
+    const r = await this.call(node, "/v1/runs", { method: "POST", headers: { "idempotency-key": key }, body: JSON.stringify(body), signal: turn.signal });
     if (r.status === 404 && (await r.clone().text()).toLowerCase().includes("session")) return null; // session gone
     if (!r.ok) throw new Error(`agent refused the message (HTTP ${r.status}: ${(await r.text()).slice(0, 160)})`);
     return (await r.json() as { run_id: string }).run_id;
@@ -87,7 +115,7 @@ class HermesAgent {
 
   /** One-shot completion (no session, no stream) through the same API server: a thread title, or throws. */
   async title(transcript: string, signal?: AbortSignal): Promise<string> {
-    const r = await this.call("/v1/chat/completions", { method: "POST", signal, body: JSON.stringify({ messages: [
+    const r = await this.call(await this.node(), "/v1/chat/completions", { method: "POST", signal, body: JSON.stringify({ messages: [
       { role: "system", content: "You name chat threads. Reply with ONLY a title of at most 6 words (at most 40 characters) "
         + "that summarises what the whole conversation is about now. No quotes, no markdown, no tools, no final period." },
       { role: "user", content: transcript }] }) }, 120000);
@@ -100,55 +128,57 @@ class HermesAgent {
   async steer(state: Record<string, unknown>, text: string): Promise<boolean> {
     const run = state.run_id as string | undefined;
     if (!run) return false;
-    const r = await this.call(`/v1/runs/${run}/steer`, { method: "POST", body: JSON.stringify({ input: text }) }, 15000);
+    const r = await this.call(await this.nodeOf(state), `/v1/runs/${run}/steer`, { method: "POST", body: JSON.stringify({ input: text }) }, 15000);
     if (!r.ok) return false;
     return (await r.json().catch(() => ({})) as { accepted?: boolean }).accepted === true;
   }
 
   /** Ends a run (POST /v1/runs/<id>/stop); a failure is only logged. */
-  private async stopRun(run: string) {
+  private async stopRun(node: NodeConfig, run: string) {
     try {
-      const r = await this.call(`/v1/runs/${run}/stop`, { method: "POST", body: "{}" }, 10000);
+      const r = await this.call(node, `/v1/runs/${run}/stop`, { method: "POST", body: "{}" }, 10000);
       if (!r.ok) console.error(`agent-hermes: stopping run ${run} answered HTTP ${r.status}`);
     } catch (e) { console.error(`agent-hermes: stopping run ${run} failed:`, (e as Error).message); }
   }
 
   /** Follows a run; when the turn is cancelled, the run itself is stopped too. */
-  private async *followOrStop(run: string, turn: AgentTurn): AsyncGenerator<AgentEvent> {
-    try { yield* this.follow(run, turn.signal); }
-    catch (e) { if (turn.cancel?.aborted) await this.stopRun(run); throw e; }
+  private async *followOrStop(node: NodeConfig, run: string, turn: AgentTurn): AsyncGenerator<AgentEvent> {
+    try { yield* this.follow(node, run, turn.signal); }
+    catch (e) { if (turn.cancel?.aborted) await this.stopRun(node, run); throw e; }
   }
 
   async *send(turn: AgentTurn): AsyncGenerator<AgentEvent> {
     turn = { ...turn, signal: both(turn) };
     const key = `sleipnyr2-${crypto.randomUUID()}`;
+    const node = await this.node();
     let session = turn.state.session_id as string | undefined;
-    if (!session) { session = await this.newSession(turn); yield { type: "state", state: { session_id: session } }; }
-    let run = await this.startRun(session, turn, key);
+    if (!session) { session = await this.newSession(node, turn); yield { type: "state", state: { session_id: session } }; }
+    let run = await this.startRun(node, session, turn, key);
     if (run === null) { // the agent forgot the session: open a new one
-      session = await this.newSession(turn);
+      session = await this.newSession(node, turn);
       yield { type: "state", state: { session_id: session } };
-      run = await this.startRun(session, turn, key + "-2");
+      run = await this.startRun(node, session, turn, key + "-2");
       if (run === null) throw new Error("agent session vanished twice");
     }
-    yield { type: "state", state: { session_id: session, run_id: run } };
-    yield* this.followOrStop(run, turn);
+    yield { type: "state", state: { session_id: session, run_id: run, node: node.name || null } };
+    yield* this.followOrStop(node, run, turn);
   }
 
   async *resume(turn: AgentTurn): AsyncGenerator<AgentEvent> {
     const run = turn.state.run_id as string | undefined;
     if (!run) { yield { type: "error", message: "the message never reached the agent; please send it again" }; return; }
-    yield* this.followOrStop(run, { ...turn, signal: both(turn) });
+    yield* this.followOrStop(await this.nodeOf(turn.state), run, { ...turn, signal: both(turn) });
   }
 
   /** A run's events until it settles: the live stream first, then polling its status. */
-  private async *follow(run: string, signal?: AbortSignal): AsyncGenerator<AgentEvent> {
+  private async *follow(node: NodeConfig, run: string, signal?: AbortSignal): AsyncGenerator<AgentEvent> {
+    const host = node.name ? { node: node.name } : {}; // which machine produced the reply
     const idle = new AbortController();
     let timer = setTimeout(() => idle.abort(), this.timeoutMs);
     const alive = () => { clearTimeout(timer); timer = setTimeout(() => idle.abort(), this.timeoutMs); };
     try {
       const sig = signal ? AbortSignal.any([signal, idle.signal]) : idle.signal;
-      const r = await fetch(`${this.cfg.url.replace(/\/+$/, "")}/v1/runs/${run}/events`, { headers: this.headers(), signal: sig });
+      const r = await fetch(`${node.url.replace(/\/+$/, "")}/v1/runs/${run}/events`, { headers: this.headers(), signal: sig });
       if (r.ok && r.body) {
         const dec = new TextDecoder();
         let buf = "";
@@ -163,7 +193,7 @@ class HermesAgent {
             let e: any;
             try { e = JSON.parse(line.slice(5)); } catch { continue; }
             const ev = toEvent(e);
-            if (ev) yield ev;
+            if (ev) yield ev.type === "done" ? { ...ev, ...host } : ev;
             if (ev?.type === "done" || ev?.type === "error") { r.body.cancel().catch(() => {}); return; }
           }
         }
@@ -176,11 +206,11 @@ class HermesAgent {
     while (true) {
       if (signal?.aborted) throw signal.reason;
       try {
-        const r = await this.call(`/v1/runs/${run}`, { signal });
+        const r = await this.call(node, `/v1/runs/${run}`, { signal });
         if (r.status === 404) { yield { type: "error", message: "the agent forgot this run (agent restarted?)" }; return; }
         const s = await r.json() as { status: string; output?: string; error?: string; pending_steer?: string };
         lastSign = Date.now();
-        if (s.status === "completed") { yield { type: "done", text: s.output || "", ...(s.pending_steer ? { unsent: String(s.pending_steer) } : {}) }; return; }
+        if (s.status === "completed") { yield { type: "done", text: s.output || "", ...(s.pending_steer ? { unsent: String(s.pending_steer) } : {}), ...host }; return; }
         if (["failed", "cancelled", "interrupted"].includes(s.status)) { yield { type: "error", message: `run ${s.status}: ${s.error || ""}`.trim() }; return; }
       } catch (e) {
         if (signal?.aborted) throw e;
@@ -222,7 +252,7 @@ const plugin: ServerPlugin = {
     for (const a of list) if (!process.env[a.keyEnv]) k.log(`warning: ${a.keyEnv} is not set; agent ${a.id} will refuse`);
     const get = (id: string) => { const a = agents.get(id); if (!a) throw new Error(`unknown agent ${id}`); return a; };
     const service: AgentService = {
-      agents: () => list.map(a => ({ id: a.id, name: a.name })),
+      agents: () => list.map(a => ({ id: a.id, name: a.name, ...(a.nodes?.length ? { nodes: a.nodes.map(n => n.name) } : {}) })),
       send: (id, turn) => get(id).send(turn),
       resume: (id, turn) => get(id).resume(turn),
       title: (id, transcript, signal) => get(id).title(transcript, signal),

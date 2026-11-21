@@ -11,6 +11,7 @@
 // Plain JavaScript (no conversion step), so the chat loads even if a
 // TypeScript file elsewhere breaks.
 import { render } from "/web/text.js";
+const OPTS = /\{\{([^{}\n]*\|[^{}\n]*)\}\}/g;
 import { ONE_SENTENCE, runs } from "/web/hcp.js";
 import { BACK_SVG } from "/web/head.js";
 
@@ -322,7 +323,8 @@ export async function mount(root, ctx) {
     if (d.role === "user") return ctx.user?.name || "You";
     const t = threadOf(d.thread);
     const id = t?.data.agent || "";
-    return st.agentNames.get(id) || id || "Agent";
+    const name = st.agentNames.get(id) || id || "Agent";
+    return d.node ? `${name} (${d.node})` : name; // the machine that produced this reply
   }
 
   // A manual rename: the server then stops renaming this thread automatically.
@@ -485,6 +487,27 @@ export async function mount(root, ctx) {
     return box;
   }
 
+  // answered = a later user message in the same thread; the chosen option stays marked
+  function optionsEl(m, sets) {
+    const pool = m.data.thread === st.hist?.id ? st.histMsgs : st.msgs;
+    const later = [...pool.values()].find(u => u.data.role === "user" && Number(u.created) > Number(m.created));
+    const picked = later ? String(later.data.text || "").trim() : "";
+    return h("div", { class: "c-opts" }, ...sets.map(set => h("div", { class: "c-opts-row" }, ...set.map(o =>
+      h("button", { class: "c-btn c-opt" + (picked === o ? " on" : ""), type: "button", disabled: later ? "" : null,
+        onclick: e => pickOption(m, o, e.currentTarget) }, o)))));
+  }
+  async function pickOption(m, text, btn) {
+    for (const b of btn.parentElement.parentElement.querySelectorAll("button")) b.disabled = true;
+    btn.classList.add("on");
+    try {
+      if (m.data.thread === st.hist?.id && emb?.view && st.hist?.data.view === emb.view) await sendView(emb.view, { text });
+      else await post(m.data.thread, { text });
+    } catch (e) {
+      for (const b of btn.parentElement.parentElement.querySelectorAll("button")) b.disabled = false;
+      btn.classList.remove("on"); say(`Not sent: ${e.message}`, true);
+    }
+  }
+
   function messageEl(m) {
     const d = m.data, live = st.live.get(m.id);
     const el = h("article", { class: `c-msg ${d.role}${d.notice ? " notice" : ""}`, id: m.id, "data-id": m.id, "data-k-id": m.id, "data-k-kind": `${d.role} message` });
@@ -501,13 +524,17 @@ export async function mount(root, ctx) {
     }
     // a notice (posted by a local service, e.g. a finished Kanban card) shows its one line; the agent got the full text
     const text = d.notice ? d.notice : d.role === "agent" && live && live.text.length > (d.text || "").length ? live.text : d.text;
+    // "{{A|B|C}}" in an agent reply = one-tap answers; tapping one sends it as the user's reply
+    const opts = [];
+    const shown = d.role === "agent" && text ? text.replace(OPTS, (_, o) => { opts.push(o.split("|").map(x => x.trim()).filter(Boolean)); return ""; }) : text;
     if (text) {
-      const box = h("div", { class: "c-text" }, render(text));
+      const box = h("div", { class: "c-text" }, render(shown));
       el.append(box);
       if (d.role === "agent" && live && !st.fades.has(m.id)) st.fades.set(m.id, { len: d.text ? box.textContent.length : 0, segs: [] });
       const f = d.role === "agent" && st.fades.get(m.id);
       if (f) { try { fadeNew(box, f); } catch { /* fade is cosmetic */ } if (!live && !f.segs.length) st.fades.delete(m.id); }
     }
+    if (opts.length && d.status === "done") el.append(optionsEl(m, opts));
     const working = ["queued", "working", "transcribing"].includes(d.status);
     if (working) {
       const what = d.status === "transcribing" ? "transcribing…" : live?.progress || (d.status === "queued" ? "waiting…" : "working…");

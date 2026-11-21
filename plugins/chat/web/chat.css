@@ -236,6 +236,11 @@ body:has(.c-shell:not(.thread-open) .c-strip:not([hidden])) { --bar-line: var(--
 .c-quiet { margin: .35rem 0 0; color: var(--text-muted); font-size: .85em; }
 .c-again-row { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
 .c-again { min-height: 2rem; font-size: .95em; color: var(--text); }
+.c-opts { display: flex; flex-direction: column; gap: .4rem; margin-top: .5rem; }
+.c-opts-row { display: flex; flex-wrap: wrap; gap: .4rem; }
+.c-opt { min-height: 2.4rem; padding: 0 .9rem; color: var(--text); }
+.c-opt.on { border-color: var(--accent-here); color: var(--accent-here); }
+.c-opt:disabled:not(.on) { opacity: .45; }
 /* what the agent did on screen this turn (declared actions), one muted line each */
 .c-calls { list-style: none; margin: .35rem 0 0; padding: 0; color: var(--text-muted); font-size: .78em; }
 .c-calls li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
