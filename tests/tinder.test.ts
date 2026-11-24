@@ -16,8 +16,8 @@ const kernel = { items: app.store.items("tinder"), config: { cooldownHours: 24, 
 const t = new Tinder(kernel, async (body, board) => { made.push({ body, board }); return `t_${made.length}`; });
 
 test("a rewording is the same task", () => {
-  expect(sameTask(keyOf("Write the README for Sleipnyr 2 plugins"), keyOf("Sleipnyr 2 plugins: write README"))).toBe(true);
-  expect(sameTask(keyOf("Write the README for Sleipnyr 2"), keyOf("Back up the Gmail archive"))).toBe(false);
+  expect(sameTask(keyOf("Write the README for Sleipnyr plugins"), keyOf("Sleipnyr plugins: write README"))).toBe(true);
+  expect(sameTask(keyOf("Write the README for Sleipnyr"), keyOf("Back up the Gmail archive"))).toBe(false);
 });
 
 test("reject sinks it, keeps it and brings it back after the cooldown", () => {

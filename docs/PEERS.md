@@ -1,6 +1,6 @@
-# People: chat between two Sleipnyr 2 instances (trial)
+# People: chat between two Sleipnyr instances (trial)
 
-The `people` plugin lets two people, each running their own Sleipnyr 2,
+The `people` plugin lets two people, each running their own Sleipnyr,
 write to each other. The People modality (`/m/people`) lists the people you
 have paired with. Each person opens a conversation drawn like a chat
 thread. The shared bar sends text, voice messages and files.

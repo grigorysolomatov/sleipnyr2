@@ -1,7 +1,7 @@
-# For agents installing or operating Sleipnyr 2
+# For agents installing or operating Sleipnyr
 
 You are an agent (for example a Hermes Agent) asked to install, configure or
-run Sleipnyr 2 for your user. This page is what you need; `README.md`
+run Sleipnyr for your user. This page is what you need; `README.md`
 explains the architecture and `docs/INSTALL.md` the install steps.
 
 ## Ground rules

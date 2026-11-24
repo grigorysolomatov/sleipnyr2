@@ -1,4 +1,4 @@
-# Sleipnyr 2
+# Sleipnyr
 
 A small personal app for working with agents: a kernel that keeps saved
 items and links, and plugins that do everything else. Version 1 ships one
@@ -242,7 +242,7 @@ agent's working state a spinner and words, errors a "!" and words).
   dashboard page (trial).
 - `tinder` - the agent suggests tasks as a card stack; swipe right queues a
   Kanban card (needs a Kanban HTTP endpoint, see `docs/AGENTS.md`).
-- `people` - person-to-person chat with other people's Sleipnyr 2
+- `people` - person-to-person chat with other people's Sleipnyr
   instances (trial): signed server-to-server messages, queued while the
   other side is offline, no agent involved. Pairing: `docs/PEERS.md`.
 - `next-thread` - a bent-arrow icon (top right) in the thread bar: a new thread from the open

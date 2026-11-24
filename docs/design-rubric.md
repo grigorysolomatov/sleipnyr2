@@ -1,4 +1,4 @@
-# Design rubric (Sleipnyr 2)
+# Design rubric (Sleipnyr)
 
 How an agent judges a view or a change. Run the tour first, then read the
 screenshots against this list. Report findings as a list. Fix only clear

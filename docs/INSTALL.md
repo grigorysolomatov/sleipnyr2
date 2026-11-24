@@ -1,13 +1,13 @@
-# Installing Sleipnyr 2
+# Installing Sleipnyr
 
-This guide installs Sleipnyr 2 on one Linux server you own, reachable from
+This guide installs Sleipnyr on one Linux server you own, reachable from
 your phone and PC over Tailscale with HTTPS. Two paths: a generic Linux
 server (systemd) and NixOS (a module in `deploy/nixos/`).
 
 What runs where:
 
 ```
-browser (phone/PC) --HTTPS--> tailscale serve --> Sleipnyr 2 (bun, :8180)
+browser (phone/PC) --HTTPS--> tailscale serve --> Sleipnyr (bun, :8180)
                                                     |-> Hermes API server (:8642)  agent turns
                                                     |-> transcribe sidecar (:8181) voice -> text   (optional)
                                                     |-> speak sidecar (:8182)      text -> voice   (optional)
@@ -83,7 +83,7 @@ Open http://127.0.0.1:8180/ on the server (or through an SSH tunnel:
 
 ```
 [Unit]
-Description=Sleipnyr 2
+Description=Sleipnyr
 After=network.target
 
 [Service]
@@ -127,7 +127,7 @@ sudo -u sleipnyr2 /var/lib/sleipnyr2/stt/bin/pip install faster-whisper numpy
 
 ```
 [Unit]
-Description=Sleipnyr 2 speech-to-text
+Description=Sleipnyr speech-to-text
 After=network.target
 
 [Service]
@@ -173,12 +173,12 @@ tailscale serve status
 Open `https://<server name>.<your tailnet>.ts.net:8443/` on your phone (with
 Tailscale on) and use "Add to home screen" / "Install app". Only devices on
 your tailnet can reach it. Do not use `tailscale funnel` (that would put it
-on the public internet; Sleipnyr 2 has no login of its own yet). The one
+on the public internet; Sleipnyr has no login of its own yet). The one
 exception is the separate inbox of the `people` plugin, see `docs/PEERS.md`.
 
 ## 3. Connecting a Hermes agent
 
-Sleipnyr 2 talks to a Hermes Agent through Hermes' API server (the
+Sleipnyr talks to a Hermes Agent through Hermes' API server (the
 OpenAI-compatible HTTP endpoint with sessions and background runs). On the
 Hermes side, enable the API server on 127.0.0.1:8642 with a key (see the
 Hermes docs, "API server"; the key is `API_SERVER_KEY` in Hermes' `.env`).
@@ -204,7 +204,7 @@ service" (`plugins.chat.agentFiles`, default http://127.0.0.1:9122, bearer
 key `AGENT_FILES_KEY`, `GET /files?path=...`) and shows it inline. Without
 that service the line stays as text with "(could not fetch: ...)".
 
-Live view effects (optional): give the agent the MCP server Sleipnyr 2
+Live view effects (optional): give the agent the MCP server Sleipnyr
 exposes at `POST /k/mcp` (see `docs/AGENTS.md`, "MCP actions"). In Hermes'
 `config.yaml`:
 
@@ -231,7 +231,7 @@ Copy `deploy/nixos/sleipnyr2.nix` into your configuration and import it:
     tailscalePort = 8443;                 # null = loopback only
     environmentFile = "/etc/nixos/secrets/sleipnyr2.env";   # root-only, not in git
     settings = {
-      app = { name = "Sleipnyr 2"; shortName = "Sleipnyr 2"; home = "chat"; agentName = "Agent"; };
+      app = { name = "Sleipnyr"; shortName = "Sleipnyr"; home = "chat"; agentName = "Agent"; };
       user = { id = "me"; name = "Ada"; };
       plugins = {
         settings = { };   # was theme (still accepted)

@@ -1,4 +1,4 @@
-// People: person-to-person chat between two Sleipnyr 2 instances (trial).
+// People: person-to-person chat between two Sleipnyr instances (trial).
 // No agent takes part: messages are never sent to an agent, and this plugin
 // needs no agent service.
 //

@@ -278,7 +278,7 @@ export class Actions {
           protocolVersion: String(m.params?.protocolVersion || "2025-06-18"),
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: "sleipnyr2", version: "1" },
-          instructions: "Live effects on the user's open Sleipnyr 2 pages (blink, highlight, mark any message part, scroll, reopen the reply). "
+          instructions: "Live effects on the user's open Sleipnyr pages (blink, highlight, mark any message part, scroll, reopen the reply). "
             + "The view_* tools work on whatever view is on screen: view_describe lists its items, then mark, scroll_to, focus, animate or order them, "
             + "open, fold or go back as the user would, and play, pause or seek audio (view_media_*). "
             + "Effects are temporary: the page's stop control or a reload ends them. Every call is logged and shown in the thread.",

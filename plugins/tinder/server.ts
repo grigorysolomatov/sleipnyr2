@@ -133,11 +133,11 @@ export class Tinder {
     const user = this.k.user?.name || "the user", agent = this.k.app?.agentName || "the agent";
     const rules = (Array.isArray(this.k.config.rules) ? this.k.config.rules as unknown[] : DEFAULT_RULES).map(r => String(r).replaceAll("{user}", user));
     const body = [
-      `Accepted by ${user} in Sleipnyr 2 Task Tinder (swipe right) on ${new Date().toLocaleString("sv-SE").slice(0, 16)}.`,
+      `Accepted by ${user} in Sleipnyr Task Tinder (swipe right) on ${new Date().toLocaleString("sv-SE").slice(0, 16)}.`,
       "", `Task: ${d.title}`, `Why (${agent}'s suggestion): ${d.why || "-"}`, `Rough cost: ${d.cost || "?"}; tier: ${t.label}.`, "",
       "Scope: do exactly this task. If it is underspecified, do the smallest sensible version and say so in the handoff.",
       ...rules,
-      `Origin: Sleipnyr 2 suggestion ${id}.`,
+      `Origin: Sleipnyr suggestion ${id}.`,
     ].join("\n");
     const card = await this.create({ title: d.title, body, assignee: String(this.cfg("assignee", "default")),
       ...(t.model ? { model_override: t.model } : {}), ...(t.provider ? { provider_override: t.provider } : {}),

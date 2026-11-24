@@ -1,4 +1,4 @@
-// Headless browser smoke test of a running Sleipnyr 2 (deploy.sh runs it
+// Headless browser smoke test of a running Sleipnyr (deploy.sh runs it
 // before and after switching releases):
 //   bun tests/smoke.ts <url> [screenshot-dir]
 // Passes when, on a phone-sized and a desktop-sized page, the app loads, a

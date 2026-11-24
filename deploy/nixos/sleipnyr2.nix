@@ -1,4 +1,4 @@
-# NixOS module: Sleipnyr 2 (kernel + plugins on Bun), its speech-to-text
+# NixOS module: Sleipnyr (kernel + plugins on Bun), its speech-to-text
 # and text-to-speech sidecars, and HTTPS on the tailnet through `tailscale serve`.
 #
 # The code is deployed as release folders by deploy/deploy.sh into
@@ -42,7 +42,7 @@ let
 in
 {
   options.services.sleipnyr2 = {
-    enable = lib.mkEnableOption "Sleipnyr 2";
+    enable = lib.mkEnableOption "Sleipnyr";
     port = lib.mkOption { type = lib.types.port; default = 8180; };
     transcribePort = lib.mkOption { type = lib.types.port; default = 8181; };
     speakPort = lib.mkOption { type = lib.types.port; default = 8182; };
@@ -89,7 +89,7 @@ in
     ];
 
     systemd.services.sleipnyr2 = {
-      description = "Sleipnyr 2";
+      description = "Sleipnyr";
       wantedBy = [ "multi-user.target" ];
       after = [ "network.target" "sleipnyr2-transcribe.service" "sleipnyr2-speak.service" ];
       wants = [ "sleipnyr2-transcribe.service" "sleipnyr2-speak.service" ];
@@ -116,7 +116,7 @@ in
     };
 
     systemd.services.sleipnyr2-transcribe = {
-      description = "Sleipnyr 2 speech to text";
+      description = "Sleipnyr speech to text";
       wantedBy = [ "multi-user.target" ];
       after = [ "network.target" ];
       unitConfig.ConditionPathExists = "${cfg.stateDir}/releases/current/tools/transcribe/transcribe.py";
@@ -145,7 +145,7 @@ in
     };
 
     systemd.services.sleipnyr2-speak = {
-      description = "Sleipnyr 2 text to speech (Kokoro)";
+      description = "Sleipnyr text to speech (Kokoro)";
       wantedBy = [ "multi-user.target" ];
       after = [ "network.target" ];
       unitConfig.ConditionPathExists = "${cfg.stateDir}/releases/current/tools/speak/speak.py";
@@ -174,7 +174,7 @@ in
     # Finished cards report back: tools/kanban-report/kanban_report.py follows every board's task
     # events and posts a notice into the card's origin thread, which runs an agent turn there.
     systemd.services.sleipnyr2-kanban-report = lib.mkIf cfg.kanbanReport.enable {
-      description = "Sleipnyr 2: finished Kanban cards report into their chat thread";
+      description = "Sleipnyr: finished Kanban cards report into their chat thread";
       wantedBy = [ "multi-user.target" ];
       after = [ "sleipnyr2.service" ];
       unitConfig.ConditionPathExists = "${cfg.stateDir}/releases/current/tools/kanban-report/kanban_report.py";
@@ -203,7 +203,7 @@ in
     };
 
     systemd.services.sleipnyr2-serve = lib.mkIf (cfg.tailscalePort != null) {
-      description = "tailscale serve :${toString cfg.tailscalePort} -> Sleipnyr 2";
+      description = "tailscale serve :${toString cfg.tailscalePort} -> Sleipnyr";
       wantedBy = [ "multi-user.target" ];
       after = [ "tailscaled.service" ];
       requires = [ "tailscaled.service" ];

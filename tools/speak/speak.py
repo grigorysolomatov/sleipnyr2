@@ -1,4 +1,4 @@
-"""Text to speech for Sleipnyr 2's hands-free voice mode: a small HTTP
+"""Text to speech for Sleipnyr's hands-free voice mode: a small HTTP
 service around Kokoro-82M (CPU, about 4x faster than real time).
 
   POST /api/speak   {"text": "...", "voice"?: "am_michael", "speed"?: 1.0}
